@@ -8,7 +8,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use launcher_core::calc;
 use launcher_core::rank::completion;
 use launcher_core::text::fold;
 use launcher_core::{Item, Ranker, Usage};
@@ -32,7 +31,7 @@ use objc2_foundation::{
     NSString, NSTimeZone, NSURL,
 };
 
-use crate::{apps, ask, config, rates, store};
+use crate::{apps, ask, config, plugins, store};
 
 // Sizes in points, measured from Spotlight (docs/REQUIREMENTS.md, section 5.5).
 const PANEL_W: f64 = 640.0;
@@ -351,6 +350,8 @@ pub struct State {
     table: Retained<NSTableView>,
     items: RefCell<Vec<Item>>,
     config: RefCell<config::Config>,
+    /// The features that are switched on.
+    plugins: RefCell<plugins::Registry>,
     config_modified: Cell<Option<std::time::SystemTime>>,
     config_error: RefCell<Option<String>>,
     usage: RefCell<Usage>,
@@ -775,6 +776,7 @@ impl Controller {
             table,
             items: RefCell::new(Vec::new()),
             config: RefCell::new(config::Config::default()),
+            plugins: RefCell::new(plugins::Registry::default()),
             config_modified: Cell::new(None),
             config_error: RefCell::new(None),
             usage: RefCell::new(store::load()),
@@ -865,7 +867,7 @@ impl Controller {
     fn after_show(&self) {
         let s = self.ivars();
         let t = std::time::Instant::now();
-        *s.running.borrow_mut() = running_bundle_paths();
+        *s.running.borrow_mut() = if s.plugins.borrow().on("apps") { running_bundle_paths() } else { HashSet::new() };
         let fresh = self.scan_apps();
         let changed = {
             let items = s.items.borrow();
@@ -1155,6 +1157,10 @@ impl Controller {
             eprintln!("[rs] config.toml: {error}");
         }
         *s.config_error.borrow_mut() = loaded.error;
+        s.plugins.borrow_mut().configure(&s.config.borrow());
+        if !s.plugins.borrow().on("ask") {
+            self.cancel_ask(); // a tool still answering is stopped with its plugin
+        }
         crate::settings::config_changed(&s.config.borrow());
         if let Some(tint) = &s.tint {
             let config = s.config.borrow();
@@ -1165,111 +1171,34 @@ impl Controller {
     }
 
     fn scan_apps(&self) -> Vec<Item> {
-        let config = self.ivars().config.borrow();
-        let mut items = apps::scan(&config.aliases);
+        let s = self.ivars();
+        let config = s.config.borrow();
+        // With the apps plugin off no folder is read; only Settings is listed.
+        let mut items = if s.plugins.borrow().on("apps") { apps::scan(&config.aliases) } else { Vec::new() };
         // This app's own entry opens its settings; launching it again would
-        // only start a second copy.
+        // only start a second copy. It is the host's, so it is always there.
         if let Some(own) = own_bundle() {
-            if let Some(item) = items.iter_mut().find(|i| i.id == own) {
-                *item = Item::new(own, "Rusty Spotlight Settings", launcher_core::Kind::App, vec!["preferences".to_string()]);
+            let settings = Item::new(own.clone(), "Rusty Spotlight Settings", launcher_core::Kind::App, vec!["preferences".to_string()]);
+            match items.iter_mut().find(|i| i.id == own) {
+                Some(item) => *item = settings,
+                None => items.push(settings),
             }
         }
         items
     }
 
-    /// The calculation, conversion or web address the query asks for, if any.
+    /// The calculation, conversion, question or web address the query asks
+    /// for, if a plugin that is switched on wants it.
     fn special_row(&self, query: &str) -> Option<Row> {
-        let s = self.ivars();
-        let config = s.config.borrow();
         let trimmed = query.trim();
-
-        if let Some((tool, question)) = config::ask_query(&config, trimmed) {
-            return Some(self.ask_row(trimmed, tool, question));
-        }
-
-        // A website keyword comes first (FR-22): `gh rust-lang/rust`.
-        let (keyword, rest) = trimmed.split_once(char::is_whitespace).unwrap_or((trimmed, ""));
-        if let Some(template) = config.links.get(&keyword.to_lowercase()) {
-            if let Some(url) = config::link_url(template, rest) {
-                let shown = url.trim_start_matches("https://").trim_start_matches("http://").to_string();
-                return Some(Row {
-                    id: format!("link:{}", keyword.to_lowercase()),
-                    title: if rest.trim().is_empty() { format!("Open {shown}") } else { format!("Open “{}”", rest.trim()) },
-                    subtitle: Some(shown),
-                    kind: Kind::Link { url },
-                });
-            }
-        }
-
-        match calc::parse(trimmed) {
-            Some(calc::Query::Calc(value)) => {
-                let text = calc::format_number(value, None);
-                return Some(Row {
-                    id: "calc".into(),
-                    title: text.clone(),
-                    subtitle: None,
-                    kind: Kind::Value { expression: trimmed.to_string(), copy: text, note: None },
-                });
-            }
-            Some(calc::Query::Convert { amount, from, to }) => {
-                let to = to.unwrap_or_else(|| config.default_currency.clone());
-                // A newer rate arrives as a new presentation, never under the
-                // number already on screen.
-                rates::refresh(&[&from, &to]);
-                let (title, copy, note) = match rates::convert(amount, &from, &to) {
-                    Some((value, at, source)) => {
-                        let text = calc::format_number(value, Some(2));
-                        let unit = rates::convert(1.0, &from, &to).map(|u| u.0).unwrap_or(0.0);
-                        let age = now() - at;
-                        let stale = if age > 3.0 * 86_400.0 { " · out of date" } else { "" };
-                        let note = format!(
-                            "1 {from} = {} {to} · {source} · market rate from {}{stale}",
-                            calc::format_number(unit, Some(if unit >= 10.0 { 2 } else { 4 })),
-                            ago(age)
-                        );
-                        (format!("{text} {to}"), text, note)
-                    }
-                    None => ("Rate unavailable".to_string(), String::new(), "Waiting for the exchange rate".to_string()),
-                };
-                return Some(Row {
-                    id: "convert".into(),
-                    title,
-                    subtitle: None,
-                    kind: Kind::Value {
-                        expression: format!("{} {from} to {to}", calc::format_number(amount, None)),
-                        copy,
-                        note: Some(note),
-                    },
-                });
-            }
-            None => {}
-        }
-
-        if let Some(c) = launcher_core::units::parse(trimmed) {
-            let text = calc::format_number(c.value, Some(sig(c.value)));
-            let text = if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.').to_string() } else { text };
-            return Some(Row {
-                id: "units".into(),
-                title: format!("{text} {}", c.to),
-                subtitle: None,
-                kind: Kind::Value { expression: format!("{} {}", calc::format_number(c.amount, None), c.from), copy: text, note: None },
-            });
-        }
-
-        if let Some(q) = launcher_core::time::parse(trimmed) {
-            if let Some(a) = launcher_core::time::answer(&q, now() as i64, &zone_offset) {
-                return Some(Row {
-                    id: "time".into(),
-                    title: a.title.clone(),
-                    subtitle: None,
-                    kind: Kind::Value { expression: a.expression, copy: a.title, note: Some(a.note) },
-                });
-            }
-        }
-
-        let url = config::bare_url(trimmed)?;
-        let shown = url.trim_start_matches("https://").trim_start_matches("http://").to_string();
-        Some(Row { id: "url".into(), title: format!("Open {shown}"), subtitle: None, kind: Kind::Link { url } })
+        let asked = plugins::Query { text: trimmed, now: now(), zone: &zone_offset };
+        let answer = self.ivars().plugins.borrow_mut().special(&asked)?;
+        let kind = match answer.effect {
+            plugins::Effect::Ask { tool, question } => return Some(self.ask_row(trimmed, &tool, &question)),
+            plugins::Effect::Copy { expression, copy, note } => Kind::Value { expression, copy, note },
+            plugins::Effect::Open { url } => Kind::Link { url },
+        };
+        Some(Row { id: answer.id, title: answer.title, subtitle: answer.subtitle, kind })
     }
 
     /// Rank for the current query and show the result. After this returns,
@@ -2042,16 +1971,9 @@ fn copy_text(text: &str) {
     pasteboard.setString_forType(&ns(text), unsafe { NSPasteboardTypeString });
 }
 
-/// Decimal places for a converted amount: about four significant digits,
-/// and none from 1000 up.
-fn sig(value: f64) -> usize {
-    let magnitude = if value == 0.0 { 0 } else { value.abs().log10().floor() as i32 };
-    (3 - magnitude).clamp(0, 6) as usize
-}
-
 /// A zone's offset from UTC, in seconds, at `t` seconds since 1970. `local`
 /// is this Mac's zone. Comes from the system's time zone database.
-fn zone_offset(id: &str, t: i64) -> Option<i32> {
+pub fn zone_offset(id: &str, t: i64) -> Option<i32> {
     let zone = if id == "local" { NSTimeZone::localTimeZone() } else { NSTimeZone::timeZoneWithName(&ns(id))? };
     let date = NSDate::dateWithTimeIntervalSince1970(t as f64);
     Some(zone.secondsFromGMTForDate(&date) as i32)
@@ -2069,20 +1991,6 @@ pub fn display_name(tool: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
-    }
-}
-
-/// "just now", "12 min ago", "3 h ago", "2 d ago".
-fn ago(seconds: f64) -> String {
-    let s = seconds.max(0.0);
-    if s < 90.0 {
-        "just now".into()
-    } else if s < 3600.0 {
-        format!("{:.0} min ago", s / 60.0)
-    } else if s < 86_400.0 {
-        format!("{:.0} h ago", s / 3600.0)
-    } else {
-        format!("{:.0} d ago", s / 86_400.0)
     }
 }
 

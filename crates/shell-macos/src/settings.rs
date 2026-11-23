@@ -55,6 +55,8 @@ struct Controls {
     preview_icon: Option<Retained<NSImage>>,
     currency: Option<Retained<NSPopUpButton>>,
     ask: Option<Retained<NSPopUpButton>>,
+    /// One switch per plugin, in `plugins::all()`'s order.
+    plugins: Vec<Retained<NSButton>>,
     learning_note: Option<Retained<NSTextField>>,
 }
 
@@ -319,6 +321,16 @@ define_class!(
             if let Some(title) = sender.titleOfSelectedItem() {
                 let tool = title.to_string().to_lowercase();
                 save("ask default", || config::set_table_value("ask", "default", &config::quote(&tool)));
+            }
+        }
+
+        #[unsafe(method(pluginChanged:))]
+        fn plugin_changed(&self, sender: &NSButton) {
+            let on = sender.state() == NSControlStateValueOn;
+            if let Some(meta) = crate::plugins::all().nth(sender.tag() as usize) {
+                let table = format!("plugins.{}", meta.id);
+                save(meta.id, || config::set_table_value(&table, "enabled", if on { "true" } else { "false" }));
+                event_log(&format!("plugin {}: {}", meta.id, if on { "on" } else { "off" }));
             }
         }
 
@@ -593,6 +605,16 @@ fn sync_from(config: &config::Config) {
         }
         if let Some(v) = &c.strength_value {
             v.setStringValue(&ns(strength_word(strength)));
+        }
+        for (button, meta) in c.plugins.iter().zip(crate::plugins::all()) {
+            button.setState(state(crate::plugins::is_on(config, meta.id)));
+        }
+        // A plugin's options stay visible but cannot be changed while it is off.
+        if let Some(p) = &c.currency {
+            p.setEnabled(crate::plugins::is_on(config, "currency"));
+        }
+        if let Some(p) = &c.ask {
+            p.setEnabled(crate::plugins::is_on(config, "ask"));
         }
         if let Some(p) = &c.currency {
             if let Some(i) = CURRENCIES.iter().position(|t| t.starts_with(&config.default_currency)) {
@@ -881,6 +903,30 @@ fn search(mtm: MainThreadMarker) -> Retained<NSViewController> {
     f.controller("Search")
 }
 
+/// One switch per feature, each with a line saying what it does when on.
+fn plugins(mtm: MainThreadMarker) -> Retained<NSViewController> {
+    const LEFT: f64 = 44.0;
+    let width = WIDTH - LEFT * 2.0;
+    let metas: Vec<_> = crate::plugins::all().collect();
+    let mut f = Form::new(TOP + 44.0 + metas.len() as f64 * 62.0, mtm);
+    let intro = label("Switch off what you don't use. A plugin that is off does no work at all: nothing is fetched, watched or kept in memory.", 12.0, true, mtm);
+    f.place(&intro, LEFT, f.y, width, 32.0);
+    f.y += 44.0;
+    let mut buttons = Vec::new();
+    for (i, meta) in metas.iter().enumerate() {
+        let b = checkbox(meta.name, sel!(pluginChanged:), mtm);
+        b.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
+        b.setTag(i as NSInteger);
+        f.place(&b, LEFT, f.y, width, 20.0);
+        let blurb = label(meta.blurb, 11.0, true, mtm);
+        f.place(&blurb, LEFT + 20.0, f.y + 22.0, width - 20.0, 30.0);
+        f.y += 62.0;
+        buttons.push(b);
+    }
+    CONTROLS.with_borrow_mut(|c| c.plugins = buttons);
+    f.controller("Plugins")
+}
+
 fn advanced(mtm: MainThreadMarker) -> Retained<NSViewController> {
     let mut f = Form::new(300.0, mtm);
     let open = button("Open Configuration File", sel!(openConfigFile:), mtm);
@@ -926,6 +972,7 @@ fn build(mtm: MainThreadMarker) -> Retained<SettingsWindow> {
         (general(mtm), "gearshape"),
         (appearance(mtm), "paintpalette"),
         (search(mtm), "magnifyingglass"),
+        (plugins(mtm), "puzzlepiece.extension"),
         (advanced(mtm), "wrench.and.screwdriver"),
     ] {
         let item = NSTabViewItem::tabViewItemWithViewController(&vc);
@@ -1160,9 +1207,9 @@ pub fn snapshot(controller: &Controller, dir: &str) {
             }
         }
     };
-    let tabs = [general(mtm), appearance(mtm), search(mtm), advanced(mtm)];
+    let tabs = [general(mtm), appearance(mtm), search(mtm), plugins(mtm), advanced(mtm)];
     sync_from(&controller.config());
-    for (vc, name) in tabs.iter().zip(["general", "appearance", "search", "advanced"]) {
+    for (vc, name) in tabs.iter().zip(["general", "appearance", "search", "plugins", "advanced"]) {
         save_png(&vc.view(), &format!("settings-{name}.png"));
     }
     if let Some(image) = symbol("magnifyingglass", 14.0) {

@@ -28,6 +28,23 @@ pub struct Config {
     /// `keyword = "https://…{query}…"`: typing `keyword words` opens the URL.
     pub links: BTreeMap<String, String>,
     pub ask: Ask,
+    /// `[plugins.<id>]`: one table per feature; `enabled = false` turns it off.
+    pub plugins: BTreeMap<String, Plugin>,
+}
+
+/// One feature's table under `[plugins]`. Other keys in it are left alone.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Plugin {
+    /// Unset: the feature's own default.
+    pub enabled: Option<bool>,
+}
+
+impl Config {
+    /// Whether the feature `id` is switched on, given its default.
+    pub fn plugin_on(&self, id: &str, default: bool) -> bool {
+        self.plugins.get(id).and_then(|p| p.enabled).unwrap_or(default)
+    }
 }
 
 /// Assistant command-line tools for `? question` (FR-34).
@@ -56,7 +73,7 @@ impl Default for Ask {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { hotkey: "option+space".into(), default_currency: "INR".into(), menu_bar_icon: true, theme: "selection".into(), theme_strength: "mild".into(), animations: true, aliases: BTreeMap::new(), links: BTreeMap::new(), ask: Ask::default() }
+        Self { hotkey: "option+space".into(), default_currency: "INR".into(), menu_bar_icon: true, theme: "selection".into(), theme_strength: "mild".into(), animations: true, aliases: BTreeMap::new(), links: BTreeMap::new(), ask: Ask::default(), plugins: BTreeMap::new() }
     }
 }
 
@@ -109,6 +126,12 @@ default = "claude"
 claude = ["~/.local/bin/claude", "-p", "{question}", "--model", "haiku"]
 codex = ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "{question}"]
 grok = ["grok", "-p", "{question}", "--no-subagents"]
+
+# Each feature can be switched off, here or in Settings > Plugins. A feature
+# that is off does no work at all: no network, no background activity.
+# The features: apps, ask, websites, calculator, currency, units, time.
+# [plugins.currency]
+# enabled = false
 "##;
 
 pub fn path() -> Option<PathBuf> {
@@ -387,6 +410,24 @@ mod tests {
         assert!(!with_table(&out, "aliases", &[]).contains("\nff = "));
         // Missing: added at the end.
         assert!(toml::from_str::<Config>(&with_table("a = 1\n", "links", &entries)).is_ok_and(|c| c.links.len() == 2));
+    }
+
+    #[test]
+    fn a_plugin_is_switched_in_its_own_table() {
+        let off = with_table_value(TEMPLATE, "plugins.currency", "enabled", "false");
+        let c: Config = toml::from_str(&off).unwrap();
+        assert!(!c.plugin_on("currency", true) && c.plugin_on("units", true));
+        assert_eq!(c.ask.tools.len(), 3, "the tables before it are intact");
+        let on = with_table_value(&off, "plugins.currency", "enabled", "true");
+        assert!(toml::from_str::<Config>(&on).unwrap().plugin_on("currency", false));
+        assert_eq!(on.matches("[plugins.currency]").count(), 2, "the template's commented example, and the real table");
+        // A second plugin gets its own table and does not disturb the first.
+        let two = with_table_value(&off, "plugins.files", "enabled", "true");
+        let c: Config = toml::from_str(&two).unwrap();
+        assert!(!c.plugin_on("currency", true) && c.plugin_on("files", false));
+        // Files written before plugins existed read as before.
+        let old: Config = toml::from_str("default_currency = \"EUR\"\n[links]\ng = \"https://g/{query}\"\n").unwrap();
+        assert!(old.plugins.is_empty() && old.plugin_on("currency", true));
     }
 
     #[test]

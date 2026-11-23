@@ -1,6 +1,11 @@
 //! Exchange rates (FR-32). Rates are units of a currency per one US dollar.
 //! Refreshed only when a conversion is typed and the cached rate is over an
 //! hour old; cached rates keep working offline. Main thread only.
+//!
+//! Nothing here does anything until `set_enabled(true)` (the currency plugin
+//! being switched on): no file is read and no request is made. Switching it
+//! off forgets the rates, cancels requests in flight, and makes any reply
+//! that still arrives a no-op.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -33,6 +38,7 @@ struct State {
     session: Option<Retained<NSURLSession>>,
     on_update: Option<Box<dyn Fn()>>,
     loaded: bool,
+    enabled: bool,
 }
 
 thread_local! {
@@ -89,8 +95,35 @@ pub fn set_on_update(f: impl Fn() + 'static) {
     STATE.with_borrow_mut(|s| s.on_update = Some(Box::new(f)));
 }
 
+/// Switch rate keeping on or off. Off drops everything held in memory and
+/// cancels requests; the saved file stays for the next time it is on.
+pub fn set_enabled(on: bool) {
+    let session = STATE.with_borrow_mut(|s| {
+        if s.enabled == on {
+            return None;
+        }
+        s.enabled = on;
+        s.rates.clear();
+        s.in_flight.clear();
+        s.last_try.clear();
+        s.loaded = false;
+        s.session.take()
+    });
+    if let Some(session) = session {
+        // Outside the borrow: cancelled tasks may call their handlers.
+        session.invalidateAndCancel();
+    }
+}
+
+pub fn enabled() -> bool {
+    STATE.with_borrow(|s| s.enabled)
+}
+
 /// The cached rate for `code`, if any. USD is always 1.
 pub fn get(code: &str) -> Option<Rate> {
+    if !enabled() {
+        return None;
+    }
     if code == "USD" {
         return Some(Rate { per_usd: 1.0, at: now(), fetched: now(), source: String::new() });
     }
@@ -102,6 +135,9 @@ pub fn get(code: &str) -> Option<Rate> {
 
 /// Start a fetch for each code whose cached rate is missing or over an hour old.
 pub fn refresh(codes: &[&str]) {
+    if !enabled() {
+        return;
+    }
     for code in codes {
         if *code == "USD" {
             continue;
@@ -196,6 +232,9 @@ fn finish(code: &str) {
 fn fetch_yahoo(code: String) {
     let url = format!("https://query1.finance.yahoo.com/v8/finance/chart/USD{code}=X?interval=1d&range=1d");
     get_json(&url, move |json| {
+        if !enabled() {
+            return; // switched off while the request was out
+        }
         let meta = json.as_ref().map(|j| &j["chart"]["result"][0]["meta"]);
         let price = meta.and_then(|m| m["regularMarketPrice"].as_f64());
         let at = meta.and_then(|m| m["regularMarketTime"].as_f64());
@@ -210,6 +249,9 @@ fn fetch_yahoo(code: String) {
 /// Fallback: ExchangeRate-API's open endpoint (daily; attribution required).
 fn fetch_fallback(code: String) {
     get_json("https://open.er-api.com/v6/latest/USD", move |json| {
+        if !enabled() {
+            return;
+        }
         let rate = json.as_ref().and_then(|j| j["rates"][code.as_str()].as_f64());
         let at = json.as_ref().and_then(|j| j["time_last_update_unix"].as_f64());
         store(&code, rate, at, "Rates By Exchange Rate API");

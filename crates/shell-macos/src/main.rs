@@ -13,6 +13,7 @@ mod ask;
 mod config;
 mod hotkey;
 mod keytap;
+mod plugins;
 mod rates;
 mod settings;
 mod spaces;
@@ -43,6 +44,26 @@ fn diagnostics(args: &[String]) -> bool {
         let list: Vec<(String, String)> = items.iter().map(|i| (i.title.clone(), i.id.clone())).collect();
         theme::diagnose(&list, &args[2]);
         eprintln!("wrote {}", args[2]);
+        return true;
+    }
+    if args.len() >= 2 && args[1] == "--plugins" {
+        // rusty-spotlight --plugins [query]   which plugins are on, and the row a query leads to
+        let config = config::load(None).config;
+        let mut registry = plugins::Registry::default();
+        registry.configure(&config);
+        for meta in plugins::all() {
+            println!("{}\t{}", if registry.on(meta.id) { "on " } else { "off" }, meta.id);
+        }
+        if let Some(text) = args.get(2) {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            let t = Instant::now();
+            let answer = registry.special(&plugins::Query { text: text.trim(), now, zone: &ui::zone_offset });
+            let us = t.elapsed().as_secs_f64() * 1e6;
+            match answer {
+                Some(a) => println!("{}\t{}\t({us:.0} µs)", a.id, a.title),
+                None => println!("no plugin answers\t({us:.0} µs)"),
+            }
+        }
         return true;
     }
     if args.len() < 2 || (args[1] != "--apps" && args[1] != "--rank") {
