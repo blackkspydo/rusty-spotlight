@@ -29,7 +29,9 @@ pub fn spotlight_query(term: &str, folders_only: bool) -> Option<String> {
         return None;
     }
     let folder = if folders_only { " && kMDItemContentTypeTree == 'public.folder'" } else { "" };
-    Some(format!("kMDItemFSName == \"*{clean}*\"cd && kMDItemFSInvisible != 1{folder}"))
+    // Hidden files are dropped in `noisy`, not here: `kMDItemFSInvisible != 1`
+    // matches nothing at all on current macOS, where the attribute is unset.
+    Some(format!("kMDItemFSName == \"*{clean}*\"cd{folder}"))
 }
 
 pub fn cache_key(term: &str, folders_only: bool) -> String {
@@ -136,9 +138,9 @@ fn noisy(path: &str, home: &str) -> bool {
     if path == library || path.starts_with(&(library.clone() + "/")) {
         return true;
     }
-    path.split('/').any(|part| {
-        matches!(part, "node_modules" | "target" | ".git" | ".Trash" | "DerivedData" | ".cargo" | "build")
-    })
+    // Anything under the home folder that is hidden, or inside a hidden folder.
+    let inside = path.strip_prefix(home).unwrap_or(path);
+    inside.split('/').any(|part| part.starts_with('.') || matches!(part, "node_modules" | "target" | "DerivedData" | "build"))
 }
 
 #[cfg(test)]
@@ -150,7 +152,7 @@ mod tests {
         assert!(spotlight_query("a", false).is_none());
         assert!(spotlight_query("  x ", false).is_none());
         let query = spotlight_query("tax \"return\"", false).unwrap();
-        assert_eq!(query, "kMDItemFSName == \"*tax return*\"cd && kMDItemFSInvisible != 1");
+        assert_eq!(query, "kMDItemFSName == \"*tax return*\"cd");
         assert!(spotlight_query("notes", true).unwrap().contains("public.folder"));
         assert!(!spotlight_query("notes", false).unwrap().contains("public.folder"));
     }
@@ -173,5 +175,8 @@ mod tests {
         assert!(noisy("/Users/me/Library/Caches/x", home));
         assert!(noisy("/Users/me/code/app/node_modules/leftpad/index.js", home));
         assert!(!noisy("/Users/me/Documents/notes.txt", home));
+        assert!(noisy("/Users/me/.config/app/notes.txt", home));
+        assert!(noisy("/Users/me/code/.git/README", home));
+        assert!(noisy("/Users/me/Documents/.hidden.txt", home));
     }
 }
