@@ -14,10 +14,12 @@ A fast Spotlight replacement for macOS, written in Rust. It looks and moves like
 - **Units:** `5 km to mi`, `70kg in lb`, `100 f to c`, `6 ft`.
 - **World time:** `time in dubai`, `sydney time`, `3pm ist to sydney`.
 - **Websites:** `gh rust-lang/rust`, `yt lofi`, or a bare address such as `github.com`.
+- **Files and folders** (off until you switch it on): `file notes` lists files and folders by name; `folder notes` lists folders. Names come from the index macOS already keeps.
+- **Clipboard history** (off until you switch it on): `clip` shows recent copies, including images and files. Return puts the selected one back on the clipboard.
 - **Ask:** `? how do I untar a file` sends the question to an assistant command-line tool on your Mac (Claude Code, Codex or Grok) and shows the answer.
-- **Command-K:** shows the selected result's other actions: Show in Finder, Copy Path, Quit, Copy Link, ask another tool.
+- **Command-K:** shows the selected result's other actions: Show in Finder, Copy Path, Quit, Copy Link, Pin, Delete, ask another tool.
 
-It does not search files. Return copies the answer to a sum, conversion or question.
+Return copies the answer to a sum, conversion or question, and opens a file or folder. Images in the clipboard history are stored on disk, with a small thumbnail kept for the list.
 
 ## Requirements
 
@@ -53,6 +55,8 @@ Press **Option-Space** to open it. That is the shortcut until you choose another
 1. **Allow Input Monitoring.** macOS asks once whether Rusty Spotlight may receive keystrokes. Allow it in System Settings › Privacy & Security › Input Monitoring. The shortcut works without it, but other apps that watch the keyboard can then delay or swallow it. Rusty Spotlight only watches for its own shortcut and stores nothing you type.
 2. **Choose the shortcut** in Settings › General: click the shortcut button and press the keys you want. It applies at once.
 3. **To use Command-Space,** first turn off Spotlight's own shortcut: System Settings › Keyboard › Keyboard Shortcuts… › Spotlight › untick "Show Spotlight search". Then record Command-Space in Settings.
+4. **Clipboard history** is off until you tick it in Settings › Plugins. It then has no shortcut until you record one in Settings › General; until then, type `clip`. Return copies the item; paste it afterwards with Command-V. For Shift-Command-Space, first untick "Ask Siri about active window" under Keyboard Shortcuts › Screenshots.
+5. **File search** is off until you tick Files in Settings › Plugins. Names come from Spotlight. Desktop, Documents and Downloads stay hidden until Rusty Spotlight is allowed under System Settings › Privacy & Security › Files and Folders.
 
 Open Settings from the menu bar icon, by typing `settings` in the launcher, or by opening the app again from Finder. From Settings you can also:
 
@@ -64,7 +68,7 @@ Open Settings from the menu bar icon, by typing `settings` in the launcher, or b
 
 ## Plugins
 
-Every feature is a plugin you can switch off in Settings › Plugins: Apps, Ask, Websites, Calculator, Currency, Units and World time. A plugin that is off does no work at all. With Currency off, for example, no exchange rate is ever fetched or read from disk, and `100 usd` shows nothing.
+Every feature is a plugin you can switch on or off in Settings › Plugins: Apps, Ask, Websites, Calculator, Currency, Units and World time start on; Files and Clipboard history start off. A plugin that is off does no work at all. With Currency off, for example, no exchange rate is ever fetched or read from disk, and `100 usd` shows nothing.
 
 The same switch in the configuration file:
 
@@ -72,6 +76,15 @@ The same switch in the configuration file:
 [plugins.currency]
 enabled = false
 ```
+
+Clipboard history, while on:
+
+- checks the clipboard about once a second and keeps text, images and copied files in `~/Library/Application Support/rusty-spotlight/clipboard`, readable only by you;
+- never keeps a copy that a password manager marked as secret, nor anything copied while Passwords or Keychain Access is in front (`ignore_apps` in the configuration file changes that list);
+- drops unpinned items after 30 days (`keep_days`), and keeps at most 250;
+- does not record what was already on the clipboard when you switched it on.
+
+Switching it off stops the checking at once. What was already saved stays on disk until you clear it with Command-K › Clear Unpinned, or delete that folder.
 
 `rusty-spotlight --plugins` lists which are on; `--plugins "12*7"` also shows the row a query leads to.
 

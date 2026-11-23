@@ -73,6 +73,8 @@ pub enum Subject<'a> {
     Link,
     Ask,
     Notice,
+    Clip,
+    File,
     Nothing,
 }
 
@@ -84,6 +86,8 @@ fn kind_colour(subject: &Subject) -> Option<Rgb> {
         Subject::Link => (0.20, 0.52, 1.00),
         Subject::Ask => (0.72, 0.36, 0.98),
         Subject::Notice => (1.00, 0.72, 0.15),
+        Subject::Clip => (0.95, 0.55, 0.20),
+        Subject::File => (0.25, 0.62, 0.95),
         Subject::App(..) | Subject::Nothing => return None,
     })
 }

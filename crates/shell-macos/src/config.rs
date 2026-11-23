@@ -38,12 +38,45 @@ pub struct Config {
 pub struct Plugin {
     /// Unset: the feature's own default.
     pub enabled: Option<bool>,
+    /// The feature's own settings.
+    #[serde(flatten)]
+    pub options: toml::Table,
 }
 
 impl Config {
     /// Whether the feature `id` is switched on, given its default.
     pub fn plugin_on(&self, id: &str, default: bool) -> bool {
         self.plugins.get(id).and_then(|p| p.enabled).unwrap_or(default)
+    }
+
+    fn option(&self, id: &str, key: &str) -> Option<&toml::Value> {
+        self.plugins.get(id)?.options.get(key)
+    }
+
+    /// `[plugins.clipboard] hotkey`: opens clipboard history. Empty: none.
+    pub fn clipboard_hotkey(&self) -> String {
+        self.option("clipboard", "hotkey").and_then(|v| v.as_str()).unwrap_or("").to_string()
+    }
+
+    /// `[plugins.clipboard] keep_days`: unpinned items older than this are
+    /// dropped. 0 keeps them until the history is full.
+    pub fn clipboard_keep_days(&self) -> u32 {
+        self.option("clipboard", "keep_days").and_then(|v| v.as_integer()).map_or(30, |d| d.clamp(0, 3650) as u32)
+    }
+
+    /// `[plugins.clipboard] ignore_apps`: bundle identifiers whose copies are
+    /// never recorded. Unset: Passwords and Keychain Access.
+    pub fn clipboard_ignored_apps(&self) -> Vec<String> {
+        match self.option("clipboard", "ignore_apps").and_then(|v| v.as_array()) {
+            Some(list) => list.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+            None => crate::clipboard::DEFAULT_IGNORED_APPS.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// `[plugins.files] ambient`: file names are listed under apps as you
+    /// type, without the `file` keyword.
+    pub fn files_ambient(&self) -> bool {
+        self.option("files", "ambient").and_then(|v| v.as_bool()).unwrap_or(false)
     }
 }
 
@@ -129,9 +162,29 @@ grok = ["grok", "-p", "{question}", "--no-subagents"]
 
 # Each feature can be switched off, here or in Settings > Plugins. A feature
 # that is off does no work at all: no network, no background activity.
-# The features: apps, ask, websites, calculator, currency, units, time.
+# The features: apps, ask, websites, calculator, currency, units, time, and
+# two that start off: files and clipboard.
 # [plugins.currency]
 # enabled = false
+
+# File and folder names, from the index macOS already keeps. "file notes"
+# searches files and folders; "folder notes" searches folders. With
+# ambient = true, names are also listed under apps as you type.
+# [plugins.files]
+# enabled = true
+# ambient = false
+
+# Clipboard history: text, images and copied files, kept on this Mac. Type
+# "clip", or set a shortcut ("shift+cmd+space" is usual; first untick "Ask Siri
+# about active window" in System Settings > Keyboard > Keyboard Shortcuts >
+# Screenshots). Copies marked secret by password managers are never kept, nor
+# anything copied while one of ignore_apps is in front. Unpinned items are
+# dropped after keep_days (0: only when the history is full).
+# [plugins.clipboard]
+# enabled = true
+# hotkey = ""
+# keep_days = 30
+# ignore_apps = ["com.apple.Passwords", "com.apple.keychainaccess"]
 "##;
 
 pub fn path() -> Option<PathBuf> {
@@ -428,6 +481,22 @@ mod tests {
         // Files written before plugins existed read as before.
         let old: Config = toml::from_str("default_currency = \"EUR\"\n[links]\ng = \"https://g/{query}\"\n").unwrap();
         assert!(old.plugins.is_empty() && old.plugin_on("currency", true));
+    }
+
+    #[test]
+    fn plugin_options_are_read_from_the_plugin_table() {
+        let c = Config::default();
+        assert_eq!((c.clipboard_hotkey().as_str(), c.clipboard_keep_days(), c.files_ambient()), ("", 30, false));
+        assert_eq!(c.clipboard_ignored_apps(), ["com.apple.Passwords", "com.apple.keychainaccess"]);
+        let c: Config = toml::from_str("[plugins.clipboard]\nenabled = true\nhotkey = \"shift+cmd+space\"\nkeep_days = 7\nignore_apps = [\"com.1password.1password\"]\n[plugins.files]\nambient = true\n").unwrap();
+        assert!(c.plugin_on("clipboard", false) && !c.plugin_on("files", false));
+        assert_eq!((c.clipboard_hotkey().as_str(), c.clipboard_keep_days(), c.files_ambient()), ("shift+cmd+space", 7, true));
+        assert_eq!(c.clipboard_ignored_apps(), ["com.1password.1password"]);
+        // Saving one option leaves the others.
+        let text = "[plugins.clipboard]\nenabled = true\nkeep_days = 7\n";
+        let out = with_table_value(text, "plugins.clipboard", "hotkey", "\"ctrl+v\"");
+        let c: Config = toml::from_str(&out).unwrap();
+        assert_eq!((c.clipboard_hotkey().as_str(), c.clipboard_keep_days()), ("ctrl+v", 7));
     }
 
     #[test]

@@ -130,6 +130,24 @@ static ALL: &[Entry] = &[
         meta: Meta { id: "time", name: "World time", blurb: "The time in another city, and times converted between zones.", default_on: true },
         make: Some(|| Box::new(WorldTime)),
     },
+    Entry {
+        meta: Meta {
+            id: "files",
+            name: "Files",
+            blurb: "“file notes” and “folder notes” find names in the index macOS already keeps. Runs a search only while you type one.",
+            default_on: false,
+        },
+        make: None,
+    },
+    Entry {
+        meta: Meta {
+            id: "clipboard",
+            name: "Clipboard history",
+            blurb: "Keeps what you copy on this Mac; type “clip”. Checks the clipboard about once a second. Skips password managers.",
+            default_on: false,
+        },
+        make: None,
+    },
 ];
 
 /// Every plugin's description, in order, for Settings.
@@ -549,7 +567,7 @@ mod tests {
         // conversion is typed; none is typed here.
         let mut r = Registry::default();
         r.configure(&Config::default());
-        assert!(all().all(|m| r.on(m.id)));
+        assert!(all().all(|m| r.on(m.id) == m.default_on));
         assert!(rates::enabled());
         r.configure(&config("[plugins.currency]\nenabled = false\n"));
         assert!(!r.on("currency") && !rates::enabled());
@@ -561,9 +579,12 @@ mod tests {
     }
 
     #[test]
-    fn every_plugin_is_on_unless_the_file_says_otherwise() {
+    fn plugins_follow_their_defaults_unless_the_file_says_otherwise() {
         let c = Config::default();
-        assert!(all().all(|m| is_on(&c, m.id)));
+        // What existed before plugins stays on; what records or searches starts off.
+        let off: Vec<&str> = all().filter(|m| !is_on(&c, m.id)).map(|m| m.id).collect();
+        assert_eq!(off, ["files", "clipboard"]);
+        assert!(is_on(&config("[plugins.files]\nenabled = true\n"), "files"));
         assert!(!is_on(&c, "no-such-plugin"));
         assert!(!is_on(&config("[plugins.time]\nenabled = false\n"), "time"));
         // A table with only other keys leaves the default.

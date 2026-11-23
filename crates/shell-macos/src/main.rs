@@ -10,7 +10,9 @@
 
 mod apps;
 mod ask;
+mod clipboard;
 mod config;
+mod files;
 mod hotkey;
 mod keytap;
 mod plugins;
@@ -103,6 +105,13 @@ fn toggle_panel() {
     }
 }
 
+fn show_clipboard() {
+    let controller = CONTROLLER.with_borrow(|c| c.clone());
+    if let Some(controller) = controller {
+        controller.show_clipboard();
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if diagnostics(&args) {
@@ -123,7 +132,10 @@ fn main() {
     // Hotkey. A failure here must leave the app usable from the menu bar (FR-1).
     // RS_HOTKEY overrides the configuration file, for testing.
     let wanted = std::env::var("RS_HOTKEY").unwrap_or_else(|_| config::load(None).config.hotkey);
-    hotkey::init(&wanted, toggle_panel);
+    hotkey::init(&wanted, toggle_panel, show_clipboard);
+    if let Err(e) = hotkey::set_clipboard(&controller.clipboard_hotkey()) {
+        eprintln!("[rs] {e}");
+    }
 
     // Menu bar item: Open, Settings, Quit. It can be hidden from Settings.
     settings::install(&controller, mtm);

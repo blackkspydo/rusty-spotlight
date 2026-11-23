@@ -1,8 +1,9 @@
 //! The panel and its controller. Everything here runs on the main thread.
 //!
-//! Ranking is synchronous (about 10 µs over the app catalog), so what is in
-//! `State::rows` is exactly what the table shows after `present()` returns.
-//! Return, click and completion all read that one presentation (FR-14).
+//! Ranking is synchronous, so what is in `State::rows` is exactly what the
+//! table shows after `present()` returns. File results fill in on a later
+//! turn and keep the selected row where it was. Return, click and completion
+//! all read that one presentation (FR-14).
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -13,6 +14,7 @@ use launcher_core::text::fold;
 use launcher_core::{Item, Ranker, Usage};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Sel};
+use objc2::AnyThread;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackgroundStyle, NSBackingStoreType, NSBezierPath, NSBox, NSBoxType, NSColor, NSControl,
@@ -31,7 +33,7 @@ use objc2_foundation::{
     NSString, NSTimeZone, NSURL,
 };
 
-use crate::{apps, ask, config, plugins, store};
+use crate::{apps, ask, clipboard, config, files, plugins, store};
 
 // Sizes in points, measured from Spotlight (docs/REQUIREMENTS.md, section 5.5).
 const PANEL_W: f64 = 640.0;
@@ -275,6 +277,12 @@ enum Kind {
     Notice { path: String },
     /// The tool's answer: Return copies it.
     Answer { tool: String, text: String, height: f64, truncated: bool },
+    /// A clipboard item. Return puts it back on the clipboard.
+    Clip { id: String, pinned: bool, image: bool, icon_path: Option<String> },
+    /// A file or folder from Spotlight. Return opens it.
+    File { path: String },
+    /// A line of explanation. Return does nothing.
+    Hint,
     /// One of the selected row's actions, listed by Command-K (FR-40).
     Action { act: Act, symbol: &'static str },
 }
@@ -289,6 +297,9 @@ enum Act {
     Quit { path: String, force: bool },
     /// Ask the same question with another tool.
     AskWith { tool: String, question: String },
+    PinClip(String),
+    DeleteClip(String),
+    ClearClips,
 }
 
 /// One presented row. Return, click and the completion all act on this, never
@@ -306,10 +317,11 @@ impl Row {
         match self.kind {
             Kind::App { running: true } => "Switch",
             Kind::App { running: false } | Kind::Link { .. } => "Open",
-            Kind::Value { .. } | Kind::Answer { .. } => "Copy",
+            Kind::Value { .. } | Kind::Answer { .. } | Kind::Clip { .. } => "Copy",
             Kind::Ask { pending: true, .. } => "",
             Kind::Ask { .. } => "Ask",
-            Kind::Notice { .. } => "Open",
+            Kind::Notice { .. } | Kind::File { .. } => "Open",
+            Kind::Hint => "",
             Kind::Action { .. } => "Run",
         }
     }
@@ -330,6 +342,14 @@ struct AskRun {
     query: String,
     request: Option<ask::Request>,
     outcome: Option<Result<String, String>>,
+}
+
+/// A file search the current query is waiting on.
+#[derive(Clone)]
+struct FileWant {
+    key: String,
+    term: String,
+    folders_only: bool,
 }
 
 pub struct State {
@@ -369,6 +389,16 @@ pub struct State {
     shown_height: Cell<f64>,
     ask: RefCell<Option<AskRun>>,
     ask_timer: RefCell<Option<Retained<NSTimer>>>,
+    /// Clipboard history is what the field filters, instead of apps.
+    clip_mode: Cell<bool>,
+    clip_timer: RefCell<Option<Retained<NSTimer>>>,
+    file_want: RefCell<Option<FileWant>>,
+    file_want_at: Cell<std::time::Instant>,
+    file_run: RefCell<Option<files::Running>>,
+    file_cache: RefCell<HashMap<String, Vec<files::Hit>>>,
+    file_gen: Cell<u64>,
+    file_timer: RefCell<Option<Retained<NSTimer>>>,
+    thumbs: RefCell<HashMap<String, Retained<NSImage>>>,
     /// Height animation in flight: (from, to, start time), stepped by `spring_timer`.
     spring: Cell<Option<(f64, f64, std::time::Instant)>>,
     spring_timer: RefCell<Option<Retained<NSTimer>>>,
@@ -465,6 +495,18 @@ define_class!(
         #[unsafe(method(askTick:))]
         fn ask_tick(&self, _timer: Option<&AnyObject>) {
             self.poll_ask();
+        }
+
+        #[unsafe(method(clipTick:))]
+        fn clip_tick(&self, _timer: Option<&AnyObject>) {
+            if clipboard::poll() && self.ivars().clip_mode.get() && self.ivars().panel.isVisible() {
+                self.present_inner(false);
+            }
+        }
+
+        #[unsafe(method(fileTick:))]
+        fn file_tick(&self, _timer: Option<&AnyObject>) {
+            self.poll_files();
         }
 
         #[unsafe(method(springTick:))]
@@ -790,6 +832,15 @@ impl Controller {
             shown_height: Cell::new(0.0),
             ask: RefCell::new(None),
             ask_timer: RefCell::new(None),
+            clip_mode: Cell::new(false),
+            clip_timer: RefCell::new(None),
+            file_want: RefCell::new(None),
+            file_want_at: Cell::new(std::time::Instant::now()),
+            file_run: RefCell::new(None),
+            file_cache: RefCell::new(HashMap::new()),
+            file_gen: Cell::new(0),
+            file_timer: RefCell::new(None),
+            thumbs: RefCell::new(HashMap::new()),
             spring: Cell::new(None),
             spring_timer: RefCell::new(None),
         };
@@ -821,7 +872,25 @@ impl Controller {
     }
 
     pub fn show(&self) {
+        self.open(false);
+    }
+
+    /// The clipboard shortcut: the field filters clipboard history.
+    pub fn show_clipboard(&self) {
         let s = self.ivars();
+        if !s.plugins.borrow().on("clipboard") {
+            return;
+        }
+        if s.panel.isVisible() && s.clip_mode.get() {
+            self.dismiss();
+            return;
+        }
+        self.open(true);
+    }
+
+    fn open(&self, clips: bool) {
+        let s = self.ivars();
+        s.clip_mode.set(clips);
         let t = std::time::Instant::now();
         if config::changed_since(s.config_modified.get()) {
             self.reload_config(false);
@@ -1007,7 +1076,10 @@ impl Controller {
 
     pub fn dismiss(&self) {
         self.cancel_ask();
-        let panel = self.ivars().panel.clone();
+        self.cancel_files();
+        let s = self.ivars();
+        s.clip_mode.set(false);
+        let panel = s.panel.clone();
         if panel.isVisible() {
             event_log("hidden: dismissed");
             panel.orderOut(None);
@@ -1168,6 +1240,50 @@ impl Controller {
         }
         let items = self.scan_apps();
         *s.items.borrow_mut() = items;
+        self.sync_optional_plugins();
+    }
+
+    /// The clipboard shortcut in force: none while the plugin is off.
+    pub fn clipboard_hotkey(&self) -> String {
+        let s = self.ivars();
+        if s.plugins.borrow().on("clipboard") { s.config.borrow().clipboard_hotkey() } else { String::new() }
+    }
+
+    /// Start or stop what the files and clipboard plugins keep running. Off
+    /// leaves no timer, no search, no shortcut and nothing in memory.
+    fn sync_optional_plugins(&self) {
+        let s = self.ivars();
+        let (files_on, clips_on) = {
+            let plugins = s.plugins.borrow();
+            (plugins.on("files"), plugins.on("clipboard"))
+        };
+        if !files_on {
+            self.cancel_files();
+            s.file_cache.borrow_mut().clear();
+        }
+        if clips_on {
+            let config = s.config.borrow();
+            clipboard::start(config.clipboard_keep_days(), config.clipboard_ignored_apps());
+            if s.clip_timer.borrow().is_none() {
+                let timer = unsafe {
+                    NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(0.8, self, sel!(clipTick:), None, true)
+                };
+                // Lets the system fire it together with other wake-ups.
+                timer.setTolerance(0.3);
+                *s.clip_timer.borrow_mut() = Some(timer);
+                eprintln!("[rs] plugin clipboard: recording");
+            }
+        } else {
+            if let Some(timer) = s.clip_timer.borrow_mut().take() {
+                timer.invalidate();
+                eprintln!("[rs] plugin clipboard: off");
+            }
+            clipboard::stop();
+            s.clip_mode.set(false);
+        }
+        if let Err(error) = crate::hotkey::set_clipboard(&self.clipboard_hotkey()) {
+            eprintln!("[rs] {error}");
+        }
     }
 
     fn scan_apps(&self) -> Vec<Item> {
@@ -1204,18 +1320,62 @@ impl Controller {
     /// Rank for the current query and show the result. After this returns,
     /// `rows` and `selected` describe exactly what is on screen.
     fn present(&self) {
+        self.present_inner(true);
+    }
+
+    /// `reset` puts the selection on the first row. A late file or clipboard
+    /// update passes false and keeps the row that was selected.
+    fn present_inner(&self, reset: bool) {
         let s = self.ivars();
         let query = s.query.borrow().clone();
         let abandoned = s.ask.borrow().as_ref().is_some_and(|run| run.query != query.trim());
         if abandoned {
             self.cancel_ask();
         }
-        let special = if query.trim().is_empty() { None } else { self.special_row(&query) };
+        let kept = if reset {
+            None
+        } else {
+            let selected = s.selected.get();
+            s.rows.borrow().get(selected).map(|row| (selected, row.id.clone()))
+        };
+        let (search_files, clips) = {
+            let plugins = s.plugins.borrow();
+            (plugins.on("files"), plugins.on("clipboard"))
+        };
+        let rows = if clips && (s.clip_mode.get() || clipboard::keyword_filter(&query).is_some()) {
+            self.cancel_files();
+            self.clipboard_rows(&query)
+        } else if search_files {
+            if let Some((term, folders_only)) = files::keyword(&query) {
+                self.exclusive_files(&term, folders_only)
+            } else {
+                self.app_rows(&query)
+            }
+        } else {
+            self.cancel_files();
+            self.app_rows(&query)
+        };
+        let rows = within_budget(rows);
+        let len = rows.len();
+        *s.rows.borrow_mut() = rows;
+        if let Some((previous, id)) = kept {
+            let index = s.rows.borrow().iter().position(|row| row.id == id).unwrap_or(previous);
+            s.selected.set(if len == 0 { 0 } else { index.min(len - 1) });
+        } else {
+            s.selected.set(0);
+        }
+        s.actions.borrow_mut().take();
+        self.show_rows();
+    }
+
+    fn app_rows(&self, query: &str) -> Vec<Row> {
+        let s = self.ivars();
+        let special = if query.trim().is_empty() { None } else { self.special_row(query) };
         let mut rows: Vec<Row> = {
             let items = s.items.borrow();
             let usage = s.usage.borrow();
             let running = s.running.borrow();
-            let ranked = s.ranker.borrow_mut().rank(&query, &items, &usage, now(), MAX_ROWS);
+            let ranked = s.ranker.borrow_mut().rank(query, &items, &usage, now(), MAX_ROWS);
             ranked
                 .iter()
                 .map(|r| {
@@ -1250,20 +1410,144 @@ impl Controller {
         }
         // The special row leads unless an app is named exactly (FR-22).
         if let Some(special) = special {
-            let exact = rows.first().is_some_and(|r| fold(&r.title) == fold(&query));
+            let exact = rows.first().is_some_and(|r| fold(&r.title) == fold(query));
             rows.insert(if exact { 1 } else { 0 }, special);
         }
-        // Keep the list inside the fixed window.
-        let budget = ROW_H * MAX_ROWS as f64;
-        let mut height = 0.0;
-        rows.retain(|r| {
-            height += r.height();
-            height <= budget
-        });
-        *s.rows.borrow_mut() = rows;
-        s.selected.set(0);
-        s.actions.borrow_mut().take(); // a new ranking ends any action list
-        self.show_rows();
+        let trimmed = query.trim();
+        // File names sit under the apps, and only when nothing else claimed the query.
+        let ambient = s.plugins.borrow().on("files")
+            && s.config.borrow().files_ambient()
+            && trimmed.chars().count() >= 2
+            && rows.iter().all(|row| matches!(row.kind, Kind::App { .. }));
+        if ambient {
+            self.want_files(trimmed, false);
+            let key = files::cache_key(trimmed, false);
+            if let Some(hits) = s.file_cache.borrow().get(&key).filter(|hits| !hits.is_empty()).cloned() {
+                let files: Vec<Row> = hits.iter().take(3).map(file_row).collect();
+                let room = MAX_ROWS.saturating_sub(files.len());
+                rows.truncate(room);
+                rows.extend(files);
+            }
+        } else {
+            self.cancel_files();
+        }
+        rows
+    }
+
+    fn clipboard_rows(&self, query: &str) -> Vec<Row> {
+        let filter = if self.ivars().clip_mode.get() {
+            query.trim().to_string()
+        } else {
+            clipboard::keyword_filter(query).unwrap_or_default()
+        };
+        let entries = clipboard::search(&filter);
+        if entries.is_empty() {
+            let title = if filter.is_empty() { "Clipboard history is empty" } else { "No matches" };
+            return vec![hint("clip:none", title)];
+        }
+        entries.iter().take(MAX_ROWS).map(clip_row).collect()
+    }
+
+    fn exclusive_files(&self, term: &str, folders_only: bool) -> Vec<Row> {
+        if files::spotlight_query(term, folders_only).is_none() {
+            self.cancel_files();
+            return vec![hint("file:more", "Type a bit more to search files")];
+        }
+        self.want_files(term, folders_only);
+        let key = files::cache_key(term, folders_only);
+        match self.ivars().file_cache.borrow().get(&key) {
+            None => vec![hint("file:wait", "Searching…")],
+            Some(hits) if hits.is_empty() => {
+                vec![hint("file:none", if folders_only { "No matching folders" } else { "No matching files" })]
+            }
+            Some(hits) => hits.iter().map(file_row).collect(),
+        }
+    }
+
+    fn want_files(&self, term: &str, folders_only: bool) {
+        let key = files::cache_key(term, folders_only);
+        let s = self.ivars();
+        let same = s.file_want.borrow().as_ref().is_some_and(|want| want.key == key);
+        if !same {
+            *s.file_want.borrow_mut() = Some(FileWant { key, term: term.to_string(), folders_only });
+            s.file_want_at.set(std::time::Instant::now());
+            s.file_run.borrow_mut().take();
+        }
+        self.arm_file_timer();
+    }
+
+    fn arm_file_timer(&self) {
+        let s = self.ivars();
+        if s.file_timer.borrow().is_some() {
+            return;
+        }
+        let timer = unsafe {
+            NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(0.05, self, sel!(fileTick:), None, true)
+        };
+        *s.file_timer.borrow_mut() = Some(timer);
+    }
+
+    fn disarm_file_timer(&self) {
+        if let Some(timer) = self.ivars().file_timer.borrow_mut().take() {
+            timer.invalidate();
+        }
+    }
+
+    fn cancel_files(&self) {
+        let s = self.ivars();
+        s.file_want.borrow_mut().take();
+        s.file_run.borrow_mut().take();
+        self.disarm_file_timer();
+    }
+
+    /// Called by the file timer. Starts a search after a short pause, then
+    /// paints the rows when `mdfind` answers.
+    fn poll_files(&self) {
+        let s = self.ivars();
+        let Some(want) = s.file_want.borrow().clone() else {
+            self.disarm_file_timer();
+            return;
+        };
+        if s.file_run.borrow().as_ref().is_some_and(|run| run.key != want.key) {
+            s.file_run.borrow_mut().take();
+        }
+        let ready = s.file_run.borrow().as_ref().and_then(|run| run.poll().map(|hits| (run.generation, hits)));
+        if let Some((generation, hits)) = ready {
+            s.file_run.borrow_mut().take();
+            if generation == s.file_gen.get() {
+                self.remember_files(&want.key, hits);
+                if s.panel.isVisible() && s.actions.borrow().is_none() {
+                    self.present_inner(false);
+                }
+            }
+            return;
+        }
+        if s.file_run.borrow().is_some() {
+            return;
+        }
+        if s.file_cache.borrow().contains_key(&want.key) {
+            self.disarm_file_timer();
+            return;
+        }
+        if s.file_want_at.get().elapsed() < std::time::Duration::from_millis(120) {
+            return;
+        }
+        let generation = s.file_gen.get().wrapping_add(1);
+        s.file_gen.set(generation);
+        match files::start(&want.term, want.folders_only, generation) {
+            Some(run) => *s.file_run.borrow_mut() = Some(run),
+            None => self.disarm_file_timer(),
+        }
+    }
+
+    fn remember_files(&self, key: &str, hits: Vec<files::Hit>) {
+        let mut cache = self.ivars().file_cache.borrow_mut();
+        if cache.len() >= 8 && !cache.contains_key(key) {
+            if let Some(old) = cache.keys().next().cloned() {
+                cache.remove(&old);
+            }
+        }
+        cache.insert(key.to_string(), hits);
     }
 
     /// Size the panel for `rows` and draw them.
@@ -1323,7 +1607,9 @@ impl Controller {
             Kind::Value { .. } => format!("Copy {}", row.title),
             Kind::Answer { .. } => "Copy Answer".to_string(),
             Kind::Notice { path } => format!("Open {}", path.rsplit('/').next().unwrap_or(path)),
-            Kind::Action { .. } => return Vec::new(),
+            Kind::Clip { .. } => "Copy".to_string(),
+            Kind::File { .. } => format!("Open {}", row.title),
+            Kind::Hint | Kind::Action { .. } => return Vec::new(),
         };
         let mut list = vec![action(0, primary, Act::Primary, "return")];
         let mut add = |title: String, act: Act, symbol: &'static str| {
@@ -1355,6 +1641,15 @@ impl Controller {
                 }
             }
             Kind::Notice { path } => add("Show in Finder".into(), Act::Reveal(path.clone()), "folder"),
+            Kind::Clip { id, pinned, .. } => {
+                add((if *pinned { "Unpin" } else { "Pin" }).into(), Act::PinClip(id.clone()), "pin");
+                add("Delete".into(), Act::DeleteClip(id.clone()), "trash");
+                add("Clear Unpinned".into(), Act::ClearClips, "trash");
+            }
+            Kind::File { path, .. } => {
+                add("Show in Finder".into(), Act::Reveal(path.clone()), "folder");
+                add("Copy Path".into(), Act::Copy(path.clone()), "doc.on.doc");
+            }
             _ => {}
         }
         list
@@ -1395,6 +1690,18 @@ impl Controller {
                 *s.query.borrow_mut() = text;
                 self.start_ask(tool, question);
             }
+            Act::PinClip(id) => {
+                clipboard::pin(id);
+                self.present_inner(false);
+            }
+            Act::DeleteClip(id) => {
+                clipboard::delete(id);
+                self.present_inner(false);
+            }
+            Act::ClearClips => {
+                clipboard::clear_unpinned();
+                self.present_inner(false);
+            }
         }
     }
 
@@ -1433,7 +1740,8 @@ impl Controller {
                 Kind::Value { .. } => format!(" = {}", row.title),
                 Kind::Link { .. } => format!(" — {}", row.title),
                 Kind::Ask { pending: false, .. } => format!(" — {}", row.title),
-                Kind::Ask { .. } | Kind::Answer { .. } | Kind::Notice { .. } | Kind::Action { .. } => String::new(),
+                Kind::Ask { .. } | Kind::Answer { .. } | Kind::Notice { .. } | Kind::Action { .. } | Kind::Hint => String::new(),
+                Kind::Clip { .. } | Kind::File { .. } => format!(" — {}", row.action()),
                 Kind::App { .. } => match completion(&query, &row.title) {
                     Some(rest) => format!("{rest} — {}", row.action()),
                     None => format!(" — {}", row.title),
@@ -1445,8 +1753,12 @@ impl Controller {
         let selected = s.rows.borrow().get(s.selected.get()).cloned();
         self.update_tint(selected.as_ref());
         match &selected {
-            Some(row) if !query.is_empty() && matches!(row.kind, Kind::App { .. }) => {
-                s.field_icon.setImage(Some(&self.icon(&row.id)));
+            Some(row) if !query.is_empty() && matches!(row.kind, Kind::App { .. } | Kind::File { .. }) => {
+                let path = match &row.kind {
+                    Kind::File { path, .. } => path,
+                    _ => &row.id,
+                };
+                s.field_icon.setImage(Some(&self.icon(path)));
                 s.field_icon.setHidden(false);
             }
             _ => s.field_icon.setHidden(true),
@@ -1493,6 +1805,9 @@ impl Controller {
                 Kind::Link { .. } => Subject::Link,
                 Kind::Ask { .. } | Kind::Answer { .. } => Subject::Ask,
                 Kind::Notice { .. } => Subject::Notice,
+                Kind::Clip { .. } => Subject::Clip,
+                Kind::File { .. } => Subject::File,
+                Kind::Hint => Subject::Nothing,
             },
         };
         tint.update(&subject);
@@ -1584,6 +1899,20 @@ impl Controller {
                 self.dismiss();
                 return;
             }
+            Kind::Clip { id, .. } => {
+                if let Err(error) = clipboard::copy_entry(id) {
+                    eprintln!("[rs] clipboard: {error}");
+                    return;
+                }
+                self.dismiss();
+                return;
+            }
+            Kind::File { path, .. } => {
+                self.dismiss();
+                NSWorkspace::sharedWorkspace().openURL(&NSURL::fileURLWithPath(&ns(path)));
+                return;
+            }
+            Kind::Hint => return,
         }
 
         let mut usage = s.usage.borrow_mut();
@@ -1602,6 +1931,65 @@ impl Controller {
         let icon = NSWorkspace::sharedWorkspace().iconForFile(&ns(path));
         self.ivars().icons.borrow_mut().insert(path.to_string(), icon.clone());
         icon
+    }
+
+    /// A clipboard image's thumbnail, decoded once. The full image stays on disk.
+    fn thumb(&self, id: &str) -> Option<Retained<NSImage>> {
+        if let Some(image) = self.ivars().thumbs.borrow().get(id) {
+            return Some(image.clone());
+        }
+        let path = clipboard::thumb_path(id)?;
+        let image = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns(&path.to_string_lossy()))?;
+        let mut thumbs = self.ivars().thumbs.borrow_mut();
+        if thumbs.len() >= 48 {
+            thumbs.clear();
+        }
+        thumbs.insert(id.to_string(), image.clone());
+        Some(image)
+    }
+
+    /// The row's icon, and whether it is a picture that should fill its frame
+    /// (an app, a file, or a clipboard image) rather than a symbol.
+    fn row_image(&self, row: &Row) -> (Retained<NSImageView>, bool) {
+        let mtm = self.mtm();
+        let picture = |image: Retained<NSImage>| (NSImageView::imageViewWithImage(&image, mtm), true);
+        match &row.kind {
+            Kind::App { .. } => picture(self.icon(&row.id)),
+            Kind::File { path, .. } => picture(self.icon(path)),
+            Kind::Clip { icon_path: Some(path), .. } => picture(self.icon(path)),
+            Kind::Clip { image: true, id, .. } => {
+                if let Some(image) = self.thumb(id) {
+                    picture(image)
+                } else {
+                    self.symbol_view("photo")
+                }
+            }
+            kind => {
+                let symbol = match kind {
+                    Kind::Action { symbol, .. } => symbol,
+                    Kind::Ask { .. } => "sparkles",
+                    Kind::Notice { .. } => "exclamationmark.triangle",
+                    Kind::Clip { .. } => "doc.on.clipboard",
+                    Kind::Hint => "info.circle",
+                    _ => "globe",
+                };
+                self.symbol_view(symbol)
+            }
+        }
+    }
+
+    fn symbol_view(&self, name: &str) -> (Retained<NSImageView>, bool) {
+        let mtm = self.mtm();
+        let view = NSImageView::initWithFrame(NSImageView::alloc(mtm), NSRect::ZERO);
+        let symbol = NSImage::imageWithSystemSymbolName_accessibilityDescription(&ns(name), None).and_then(|image| {
+            image.imageWithSymbolConfiguration(&objc2_app_kit::NSImageSymbolConfiguration::configurationWithPointSize_weight(
+                24.0,
+                unsafe { NSFontWeightMedium },
+            ))
+        });
+        view.setImage(symbol.as_deref());
+        view.setContentTintColor(Some(&NSColor::secondaryLabelColor()));
+        (view, false)
     }
 
     // ------------------------------------------------------------ ask
@@ -1848,30 +2236,8 @@ impl Controller {
         // the panel's edge as measured on Spotlight, so that inset is taken off.
         const CELL_INSET: f64 = 5.5;
         // App icon artwork fills about 80% of its canvas: a 44 pt view shows a 36 pt icon.
-        let image = match &row.kind {
-            Kind::App { .. } => NSImageView::imageViewWithImage(&self.icon(&row.id), mtm),
-            kind => {
-                let view = NSImageView::initWithFrame(NSImageView::alloc(mtm), NSRect::ZERO);
-                let symbol = match kind {
-                    Kind::Action { symbol, .. } => symbol,
-                    Kind::Ask { .. } => "sparkles",
-                    Kind::Notice { .. } => "exclamationmark.triangle",
-                    _ => "globe",
-                };
-                let globe = NSImage::imageWithSystemSymbolName_accessibilityDescription(&ns(symbol), None).and_then(|g| {
-                    g.imageWithSymbolConfiguration(
-                        &objc2_app_kit::NSImageSymbolConfiguration::configurationWithPointSize_weight(24.0, unsafe {
-                            NSFontWeightMedium
-                        }),
-                    )
-                });
-                view.setImage(globe.as_deref());
-                view.setContentTintColor(Some(&NSColor::secondaryLabelColor()));
-                view
-            }
-        };
-        let app = matches!(row.kind, Kind::App { .. });
-        image.setImageScaling(if app { NSImageScaling::ScaleProportionallyUpOrDown } else { NSImageScaling::ScaleNone });
+        let (image, picture) = self.row_image(row);
+        image.setImageScaling(if picture { NSImageScaling::ScaleProportionallyUpOrDown } else { NSImageScaling::ScaleNone });
         image.setFrame(NSRect::new(NSPoint::new(13.0 - CELL_INSET, 6.0), NSSize::new(44.0, 44.0)));
         cell.addSubview(&image);
 
@@ -1963,6 +2329,46 @@ fn on_screen(window: NSInteger) -> bool {
                 .is_some_and(|n| n.integerValue() == window)
         })
     }
+}
+
+fn hint(id: &str, title: &str) -> Row {
+    Row { id: id.into(), title: title.into(), subtitle: None, kind: Kind::Hint }
+}
+
+fn clip_row(entry: &clipboard::Entry) -> Row {
+    let subtitle = match (entry.detail.is_empty(), entry.pinned) {
+        (true, false) => None,
+        (true, true) => Some("Pinned".into()),
+        (false, false) => Some(entry.detail.clone()),
+        (false, true) => Some(format!("{} · Pinned", entry.detail)),
+    };
+    let icon_path = (entry.kind == clipboard::ClipKind::Files).then(|| entry.files.first().cloned()).flatten();
+    Row {
+        id: format!("clip:{}", entry.id),
+        title: if entry.preview.is_empty() { "Clipboard item".into() } else { entry.preview.clone() },
+        subtitle,
+        kind: Kind::Clip { id: entry.id.clone(), pinned: entry.pinned, image: entry.kind == clipboard::ClipKind::Image, icon_path },
+    }
+}
+
+fn file_row(hit: &files::Hit) -> Row {
+    Row {
+        id: format!("file:{}", hit.path),
+        title: hit.name.clone(),
+        subtitle: Some(clipboard::pretty_parent(&hit.path)),
+        kind: Kind::File { path: hit.path.clone() },
+    }
+}
+
+/// Keep the list inside the fixed window.
+fn within_budget(mut rows: Vec<Row>) -> Vec<Row> {
+    let budget = ROW_H * MAX_ROWS as f64;
+    let mut height = 0.0;
+    rows.retain(|row| {
+        height += row.height();
+        height <= budget
+    });
+    rows
 }
 
 fn copy_text(text: &str) {
