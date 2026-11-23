@@ -19,7 +19,7 @@ use objc2_app_kit::{
     NSApplication, NSBackingStoreType, NSBezelStyle, NSBorderType, NSBox, NSBoxType, NSButton, NSColor, NSColorWell,
     NSControlStateValueOff, NSControlStateValueOn, NSEvent, NSEventMask, NSEventModifierFlags, NSFont,
     NSFontWeightMedium, NSGlassEffectView, NSImage, NSImageSymbolConfiguration, NSImageView,
-    NSMenu, NSMenuItem, NSPopUpButton, NSScrollView, NSSlider, NSStatusBar, NSStatusItem,
+    NSMenu, NSMenuItem, NSPopUpButton, NSScrollView, NSSlider, NSStatusBar, NSSwitch, NSStatusItem,
     NSTabViewController, NSTabViewControllerTabStyle, NSTabViewItem, NSTableColumn, NSTableView,
     NSTableViewDataSource, NSTextAlignment, NSTextField, NSVariableStatusItemLength, NSView, NSViewController,
     NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowToolbarStyle, NSWorkspace,
@@ -57,7 +57,7 @@ struct Controls {
     currency: Option<Retained<NSPopUpButton>>,
     ask: Option<Retained<NSPopUpButton>>,
     /// One switch per plugin, in `plugins::all()`'s order.
-    plugins: Vec<Retained<NSButton>>,
+    plugins: Vec<Retained<NSSwitch>>,
     learning_note: Option<Retained<NSTextField>>,
     clipboard: Option<Retained<NSButton>>,
     clipboard_note: Option<Retained<NSTextField>>,
@@ -79,10 +79,8 @@ thread_local! {
     static CONTROLS: RefCell<Controls> = RefCell::new(Controls::default());
     static PREVIEW: RefCell<Option<theme::Tint>> = const { RefCell::new(None) };
     static LISTS: RefCell<Vec<Retained<PairList>>> = const { RefCell::new(Vec::new()) };
-    /// The Plugins tab: its list, the list's data source, one pane per
-    /// plugin, and which is showing.
-    static PLUGIN_TABLE: RefCell<Option<Retained<NSTableView>>> = const { RefCell::new(None) };
-    static PLUGIN_LIST: RefCell<Option<Retained<PluginList>>> = const { RefCell::new(None) };
+    /// The Plugins tab: its list rows, one page per plugin, and which is showing.
+    static PLUGIN_ROWS: RefCell<Vec<PluginRow>> = const { RefCell::new(Vec::new()) };
     static PLUGIN_PANES: RefCell<Vec<Retained<NSView>>> = const { RefCell::new(Vec::new()) };
     static PLUGIN_SHOWN: Cell<NSInteger> = const { Cell::new(0) };
     /// The local key monitor while a shortcut is being recorded.
@@ -369,13 +367,18 @@ define_class!(
         }
 
         #[unsafe(method(pluginChanged:))]
-        fn plugin_changed(&self, sender: &NSButton) {
+        fn plugin_changed(&self, sender: &NSSwitch) {
             let on = sender.state() == NSControlStateValueOn;
             if let Some(meta) = crate::plugins::all().nth(sender.tag() as usize) {
                 let table = format!("plugins.{}", meta.id);
                 save(meta.id, || config::set_table_value(&table, "enabled", if on { "true" } else { "false" }));
                 event_log(&format!("plugin {}: {}", meta.id, if on { "on" } else { "off" }));
             }
+        }
+
+        #[unsafe(method(pluginRowClicked:))]
+        fn plugin_row_clicked(&self, sender: &NSButton) {
+            select_plugin(sender.tag());
         }
 
         #[unsafe(method(openConfigFile:))]
@@ -732,13 +735,7 @@ fn sync_from(config: &config::Config) {
             p.selectItemAtIndex(index as NSInteger);
             p.setEnabled(crate::plugins::is_on(config, "clipboard"));
         }
-        // The list shows which plugins are off.
-        PLUGIN_TABLE.with_borrow(|table| {
-            if let Some(table) = table {
-                table.reloadData();
-            }
-        });
-        select_plugin(PLUGIN_SHOWN.get());
+        // The list shows which plugins are off; painted once `c` is released.
         // A plugin's options stay visible but cannot be changed while it is off.
         if let Some(p) = &c.currency {
             p.setEnabled(crate::plugins::is_on(config, "currency"));
@@ -773,6 +770,7 @@ fn sync_from(config: &config::Config) {
             list.load(config);
         }
     });
+    paint_plugin_rows();
     SYNCING.set(false);
     refresh();
     shortcut_changed();
@@ -801,13 +799,25 @@ struct Form {
     view: Retained<NSView>,
     height: f64,
     y: f64,
+    /// The view's width, and the width of the right-aligned label column.
+    width: f64,
+    label_w: f64,
     mtm: MainThreadMarker,
 }
 
 impl Form {
     fn new(height: f64, mtm: MainThreadMarker) -> Form {
-        let view = NSView::initWithFrame(NSView::alloc(mtm), NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(WIDTH, height)));
-        Form { view, height, y: TOP, mtm }
+        Form::sized(WIDTH, LABEL_W, height, mtm)
+    }
+
+    fn sized(width: f64, label_w: f64, height: f64, mtm: MainThreadMarker) -> Form {
+        let view = NSView::initWithFrame(NSView::alloc(mtm), NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height)));
+        Form { view, height, y: TOP, width, label_w, mtm }
+    }
+
+    /// Where controls start, right of the label column.
+    fn control_x(&self) -> f64 {
+        self.label_w + 14.0
     }
 
     fn place(&self, v: &NSView, x: f64, y: f64, w: f64, h: f64) {
@@ -822,22 +832,22 @@ impl Form {
         }
         let l = label(text, 13.0, false, self.mtm);
         l.setAlignment(NSTextAlignment::Right);
-        self.place(&l, 0.0, self.y + (h - 17.0) / 2.0, LABEL_W, 17.0);
+        self.place(&l, 0.0, self.y + (h - 17.0) / 2.0, self.label_w, 17.0);
     }
 
     /// A control `w`×`h` beside `caption`; returns its x for neighbours.
     fn row(&mut self, caption: &str, control: &NSView, w: f64, h: f64) {
         self.caption(caption, h);
-        self.place(control, CONTROL_X, self.y, w, h);
+        self.place(control, self.control_x(), self.y, w, h);
         self.y += h;
     }
 
     fn note(&mut self, text: &str) -> Retained<NSTextField> {
         let n = label(text, 11.0, true, self.mtm);
-        let w = WIDTH - CONTROL_X - 28.0;
+        let w = self.width - self.control_x() - 28.0;
         let lines = (text.chars().count() as f64 * 6.2 / w).ceil().max(1.0);
         self.y += 3.0;
-        self.place(&n, CONTROL_X + 2.0, self.y, w, 15.0 * lines);
+        self.place(&n, self.control_x() + 2.0, self.y, w, 15.0 * lines);
         self.y += 15.0 * lines;
         n
     }
@@ -850,7 +860,7 @@ impl Form {
         self.y += 14.0;
         let line = NSBox::new(self.mtm);
         line.setBoxType(NSBoxType::Separator);
-        self.place(&line, 28.0, self.y, WIDTH - 56.0, 1.0);
+        self.place(&line, 28.0, self.y, self.width - 56.0, 1.0);
         self.y += 15.0;
     }
 
@@ -858,7 +868,7 @@ impl Form {
         let vc = NSViewController::new(self.mtm);
         vc.setView(&self.view);
         vc.setTitle(Some(&ns(title)));
-        vc.setPreferredContentSize(NSSize::new(WIDTH, self.height));
+        vc.setPreferredContentSize(NSSize::new(self.width, self.height));
         vc
     }
 }
@@ -1003,55 +1013,58 @@ fn appearance(mtm: MainThreadMarker) -> Retained<NSViewController> {
     f.controller("Appearance")
 }
 
-/// Width of the list of plugins down the left of the Plugins tab.
-const SIDEBAR_W: f64 = 176.0;
-/// A plugin's settings are laid out as a tab is, and tucked this far under
-/// the empty left of its label column, so the tab is not needlessly wide.
-const PANE_INSET: f64 = 44.0;
-const PLUGINS_W: f64 = SIDEBAR_W + WIDTH - PANE_INSET;
-const PLUGINS_H: f64 = 370.0;
+/// The Plugins tab: a list of plugins down the left, the selected one's page
+/// on the right.
+const SIDEBAR_W: f64 = 196.0;
+const PANE_W: f64 = 524.0;
+const PANE_LABEL_W: f64 = 104.0;
+const PLUGINS_H: f64 = 400.0;
+const ROW_H: f64 = 32.0;
 
 /// How long clipboard history keeps unpinned items: (menu title, keep_days).
 const KEEP: [(&str, u32); 6] = [("1 day", 1), ("1 week", 7), ("1 month", 30), ("3 months", 90), ("1 year", 365), ("Until the history is full", 0)];
 
-define_class!(
-    /// The list of plugins in the Plugins tab.
-    #[unsafe(super(NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[name = "RSPluginList"]
-    struct PluginList;
-
-    unsafe impl NSObjectProtocol for PluginList {}
-
-    unsafe impl NSTableViewDataSource for PluginList {
-        #[unsafe(method(numberOfRowsInTableView:))]
-        fn number_of_rows(&self, _table: &NSTableView) -> NSInteger {
-            crate::plugins::all().count() as NSInteger
-        }
-
-        #[unsafe(method_id(tableView:objectValueForTableColumn:row:))]
-        fn value(&self, _table: &NSTableView, _column: Option<&NSTableColumn>, row: NSInteger) -> Option<Retained<AnyObject>> {
-            plugin_title(row)
-        }
+/// The SF Symbol that stands for a plugin.
+fn plugin_symbol(id: &str) -> &'static str {
+    match id {
+        "apps" => "square.grid.2x2.fill",
+        "ask" => "sparkles",
+        "websites" => "globe",
+        "calculator" => "plus.forwardslash.minus",
+        "currency" => "dollarsign.circle.fill",
+        "units" => "ruler.fill",
+        "time" => "clock.fill",
+        "files" => "folder.fill",
+        "clipboard" => "doc.on.clipboard.fill",
+        _ => "puzzlepiece.extension.fill",
     }
-
-    impl PluginList {
-        #[unsafe(method(pluginSelected:))]
-        fn plugin_selected(&self, sender: &NSTableView) {
-            select_plugin(sender.selectedRow());
-        }
-    }
-);
-
-/// A plugin's row in the list: its name, and whether it is off.
-fn plugin_title(row: NSInteger) -> Option<Retained<AnyObject>> {
-    let meta = crate::plugins::all().nth(usize::try_from(row).ok()?)?;
-    let on = controller().is_none_or(|c| crate::plugins::is_on(&c.config(), meta.id));
-    let title = if on { meta.name.to_string() } else { format!("{} — off", meta.name) };
-    Some(Retained::into_super(Retained::into_super(ns(&title))))
 }
 
-/// Show one plugin's settings beside the list.
+/// One plugin's row in the list.
+struct PluginRow {
+    highlight: Retained<NSBox>,
+    icon: Retained<NSImageView>,
+    name: Retained<NSTextField>,
+    off: Retained<NSTextField>,
+}
+
+fn rounded_box(radius: f64, mtm: MainThreadMarker) -> Retained<NSBox> {
+    let b = NSBox::new(mtm);
+    b.setBoxType(NSBoxType::Custom);
+    b.setTitlePosition(objc2_app_kit::NSTitlePosition::NoTitle);
+    b.setBorderWidth(0.0);
+    b.setCornerRadius(radius);
+    b.setFillColor(&NSColor::clearColor());
+    b
+}
+
+fn symbol_view(name: &str, size: f64, mtm: MainThreadMarker) -> Retained<NSImageView> {
+    let view = NSImageView::new(mtm);
+    view.setImage(symbol(name, size).as_deref());
+    view
+}
+
+/// Show one plugin's page and mark its row.
 fn select_plugin(row: NSInteger) {
     let count = crate::plugins::all().count() as NSInteger;
     let row = if (0..count).contains(&row) { row } else { PLUGIN_SHOWN.get() };
@@ -1061,32 +1074,72 @@ fn select_plugin(row: NSInteger) {
             pane.setHidden(i as NSInteger != row);
         }
     });
-    PLUGIN_TABLE.with_borrow(|table| {
-        if let Some(table) = table {
-            if table.selectedRow() != row {
-                let rows = objc2_foundation::NSIndexSet::indexSetWithIndex(row as usize);
-                table.selectRowIndexes_byExtendingSelection(&rows, false);
-            }
+    paint_plugin_rows();
+}
+
+/// Colour the list for the selection and for which plugins are on.
+fn paint_plugin_rows() {
+    let config = controller().map(|c| c.config());
+    let shown = PLUGIN_SHOWN.get();
+    PLUGIN_ROWS.with_borrow(|rows| {
+        for (i, (row, meta)) in rows.iter().zip(crate::plugins::all()).enumerate() {
+            let selected = i as NSInteger == shown;
+            let on = config.as_ref().is_none_or(|c| crate::plugins::is_on(c, meta.id));
+            let fill = if selected { NSColor::controlAccentColor() } else { NSColor::clearColor() };
+            row.highlight.setFillColor(&fill);
+            let text = match (selected, on) {
+                (true, _) => NSColor::whiteColor(),
+                (false, true) => NSColor::labelColor(),
+                (false, false) => NSColor::tertiaryLabelColor(),
+            };
+            row.name.setTextColor(Some(&text));
+            let tint = match (selected, on) {
+                (true, _) => NSColor::whiteColor(),
+                (false, true) => NSColor::controlAccentColor(),
+                (false, false) => NSColor::tertiaryLabelColor(),
+            };
+            row.icon.setContentTintColor(Some(&tint));
+            row.off.setHidden(on);
+            row.off.setTextColor(Some(&*if selected { NSColor::whiteColor() } else { NSColor::tertiaryLabelColor() }));
         }
     });
 }
 
-/// One plugin's pane: its switch, what it does, then its own settings.
+/// One plugin's page: what it is and its switch, then its own settings.
 fn plugin_pane(index: usize, meta: &crate::plugins::Meta, mtm: MainThreadMarker) -> Form {
-    let mut f = Form::new(PLUGINS_H, mtm);
-    let switch = checkbox(&format!("Use {}", meta.name), sel!(pluginChanged:), mtm);
-    switch.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
+    let mut f = Form::sized(PANE_W, PANE_LABEL_W, PLUGINS_H, mtm);
+    // Header: a tinted tile with the plugin's symbol, its name, what it does,
+    // and the switch on the right.
+    let tile = rounded_box(9.0, mtm);
+    tile.setFillColor(&NSColor::controlAccentColor());
+    f.place(&tile, 28.0, f.y, 38.0, 38.0);
+    let icon = symbol_view(plugin_symbol(meta.id), 18.0, mtm);
+    icon.setContentTintColor(Some(&NSColor::whiteColor()));
+    f.place(&icon, 28.0, f.y, 38.0, 38.0);
+    let name = label(meta.name, 17.0, false, mtm);
+    name.setFont(Some(&NSFont::systemFontOfSize_weight(17.0, unsafe { objc2_app_kit::NSFontWeightSemibold })));
+    f.place(&name, 78.0, f.y - 1.0, PANE_W - 78.0 - 90.0, 22.0);
+    let blurb = label(meta.blurb, 11.0, true, mtm);
+    f.place(&blurb, 78.0, f.y + 22.0, PANE_W - 78.0 - 90.0, 44.0);
+    let switch = NSSwitch::new(mtm);
     switch.setTag(index as NSInteger);
-    f.row("", &switch, 330.0, 20.0);
-    f.note(meta.blurb);
+    let t = target();
+    unsafe {
+        switch.setTarget(Some(&t));
+        switch.setAction(Some(sel!(pluginChanged:)));
+    }
+    f.place(&switch, PANE_W - 28.0 - 44.0, f.y + 6.0, 44.0, 24.0);
+    f.y += 62.0;
     f.separator();
+    f.gap(4.0);
     CONTROLS.with_borrow_mut(|c| c.plugins.push(switch));
+
     let shortcut = |f: &mut Form, action: Sel, hint: &str| {
         let b = button("None", action, mtm);
         b.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
         f.row("Shortcut:", &b, 190.0, 28.0);
         let note = f.note(hint);
-        f.gap(12.0);
+        f.gap(14.0);
         (b, note)
     };
     match meta.id {
@@ -1114,7 +1167,7 @@ fn plugin_pane(index: usize, meta: &crate::plugins::Meta, mtm: MainThreadMarker)
         }
         "currency" => {
             let currency = popup(CURRENCIES, sel!(currencyChanged:), mtm);
-            f.row("Default currency:", &currency, 230.0, 26.0);
+            f.row("Convert to:", &currency, 230.0, 26.0);
             f.note("Used when you name one currency, e.g. “100 usd”.");
             CONTROLS.with_borrow_mut(|c| c.currency = Some(currency));
         }
@@ -1142,71 +1195,79 @@ fn plugin_pane(index: usize, meta: &crate::plugins::Meta, mtm: MainThreadMarker)
             });
         }
         _ => {
-            f.note("Nothing to set.");
+            let none = label("This plugin has no settings.", 12.0, true, mtm);
+            none.setAlignment(NSTextAlignment::Center);
+            f.place(&none, 0.0, f.y + 60.0, PANE_W, 16.0);
         }
     }
     f
 }
 
-/// The plugins down the left; the selected one's switch and settings beside it.
+/// The plugins down the left; the selected one's page beside them.
 fn plugins(mtm: MainThreadMarker) -> Retained<NSViewController> {
-    let root = NSView::initWithFrame(NSView::alloc(mtm), NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(PLUGINS_W, PLUGINS_H)));
+    let width = SIDEBAR_W + PANE_W;
+    let root = NSView::initWithFrame(NSView::alloc(mtm), NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, PLUGINS_H)));
     CONTROLS.with_borrow_mut(|c| c.plugins.clear());
     LISTS.with_borrow_mut(Vec::clear);
+    // `top` is measured from the top edge, as in `Form`.
+    let place = |v: &NSView, x: f64, top: f64, w: f64, h: f64| {
+        v.setFrame(NSRect::new(NSPoint::new(x, PLUGINS_H - top - h), NSSize::new(w, h)));
+        root.addSubview(v);
+    };
 
-    let table = NSTableView::new(mtm);
-    let column = NSTableColumn::initWithIdentifier(NSTableColumn::alloc(mtm), &ns("plugin"));
-    column.setWidth(SIDEBAR_W - 36.0);
-    column.setEditable(false);
-    table.addTableColumn(&column);
-    table.setHeaderView(None);
-    table.setRowHeight(26.0);
-    table.setAllowsEmptySelection(false);
-    table.setAllowsMultipleSelection(false);
-    let list = PluginList::new(mtm);
-    unsafe {
-        let _: () = msg_send![&*table, setDataSource: &*list];
-        let target: &AnyObject = &list;
-        table.setTarget(Some(target));
-        table.setAction(Some(sel!(pluginSelected:)));
+    // A quiet panel behind the list, and a hairline between it and the page.
+    let panel = rounded_box(0.0, mtm);
+    panel.setFillColor(&NSColor::labelColor().colorWithAlphaComponent(0.035));
+    place(&panel, 0.0, 0.0, SIDEBAR_W, PLUGINS_H);
+    let line = NSBox::new(mtm);
+    line.setBoxType(NSBoxType::Separator);
+    place(&line, SIDEBAR_W, 0.0, 1.0, PLUGINS_H);
+
+    let mut rows = Vec::new();
+    let t = target();
+    for (i, meta) in crate::plugins::all().enumerate() {
+        let top = 14.0 + i as f64 * (ROW_H + 2.0);
+        let highlight = rounded_box(7.0, mtm);
+        place(&highlight, 10.0, top, SIDEBAR_W - 20.0, ROW_H);
+        let icon = symbol_view(plugin_symbol(meta.id), 13.0, mtm);
+        place(&icon, 18.0, top + 6.0, 22.0, 20.0);
+        let name = label(meta.name, 13.0, false, mtm);
+        name.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingTail);
+        place(&name, 46.0, top + 7.0, SIDEBAR_W - 46.0 - 44.0, 18.0);
+        let off = label("Off", 11.0, true, mtm);
+        off.setAlignment(NSTextAlignment::Right);
+        place(&off, SIDEBAR_W - 50.0, top + 9.0, 30.0, 14.0);
+        // A clear button over the whole row takes the click.
+        let hit = NSButton::new(mtm);
+        hit.setTitle(&ns(""));
+        hit.setBordered(false);
+        hit.setTransparent(true);
+        hit.setTag(i as NSInteger);
+        unsafe {
+            hit.setTarget(Some(&t));
+            hit.setAction(Some(sel!(pluginRowClicked:)));
+        }
+        place(&hit, 10.0, top, SIDEBAR_W - 20.0, ROW_H);
+        rows.push(PluginRow { highlight, icon, name, off });
     }
-    let scroll = NSScrollView::initWithFrame(
-        NSScrollView::alloc(mtm),
-        NSRect::new(NSPoint::new(16.0, 16.0), NSSize::new(SIDEBAR_W - 16.0, PLUGINS_H - 32.0)),
-    );
-    scroll.setDocumentView(Some(&table));
-    scroll.setHasVerticalScroller(true);
-    scroll.setBorderType(NSBorderType::BezelBorder);
-    root.addSubview(&scroll);
 
     let mut panes = Vec::new();
     for (i, meta) in crate::plugins::all().enumerate() {
         let pane = plugin_pane(i, meta, mtm);
-        pane.view.setFrameOrigin(NSPoint::new(SIDEBAR_W - PANE_INSET, 0.0));
+        pane.view.setFrameOrigin(NSPoint::new(SIDEBAR_W + 1.0, 0.0));
         pane.view.setHidden(true);
         root.addSubview(&pane.view);
         panes.push(pane.view);
     }
-    // The list goes in last, so it sits above the panes' empty left edge.
-    scroll.removeFromSuperview();
-    root.addSubview(&scroll);
     PLUGIN_PANES.set(panes);
-    PLUGIN_TABLE.set(Some(table));
-    PLUGIN_LIST.set(Some(list));
+    PLUGIN_ROWS.set(rows);
     select_plugin(PLUGIN_SHOWN.get());
 
     let vc = NSViewController::new(mtm);
     vc.setView(&root);
     vc.setTitle(Some(&ns("Plugins")));
-    vc.setPreferredContentSize(NSSize::new(PLUGINS_W, PLUGINS_H));
+    vc.setPreferredContentSize(NSSize::new(width, PLUGINS_H));
     vc
-}
-
-impl PluginList {
-    fn new(mtm: MainThreadMarker) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(());
-        unsafe { msg_send![super(this), init] }
-    }
 }
 
 fn advanced(mtm: MainThreadMarker) -> Retained<NSViewController> {
@@ -1340,7 +1401,7 @@ impl PairList {
 
     fn build(&self, f: &Form, titles: (&str, &str), height: f64) {
         let mtm = f.mtm;
-        let w = WIDTH - CONTROL_X - 28.0;
+        let w = f.width - f.control_x() - 28.0;
         let table = NSTableView::new(mtm);
         for (id, title, width) in [("key", titles.0, 110.0), ("value", titles.1, w - 130.0)] {
             let column = NSTableColumn::initWithIdentifier(NSTableColumn::alloc(mtm), &ns(id));
@@ -1358,7 +1419,7 @@ impl PairList {
         scroll.setDocumentView(Some(&table));
         scroll.setHasVerticalScroller(true);
         scroll.setBorderType(NSBorderType::BezelBorder);
-        f.place(&scroll, CONTROL_X, f.y, w, height);
+        f.place(&scroll, f.control_x(), f.y, w, height);
 
         // + and − under the list, as macOS lists have them.
         let me: &AnyObject = self;
@@ -1370,11 +1431,11 @@ impl PairList {
                 b.setTarget(Some(me));
                 b.setAction(Some(action));
             }
-            f.place(&b, CONTROL_X + i as f64 * 25.0, f.y + height + 2.0, 24.0, 22.0);
+            f.place(&b, f.control_x() + i as f64 * 25.0, f.y + height + 2.0, 24.0, 22.0);
         }
         let note = label("", 11.0, false, mtm);
         note.setTextColor(Some(&NSColor::systemRedColor()));
-        f.place(&note, CONTROL_X + 60.0, f.y + height + 5.0, w - 60.0, 15.0);
+        f.place(&note, f.control_x() + 60.0, f.y + height + 5.0, w - 60.0, 15.0);
         *self.ivars().view.borrow_mut() = Some(table);
         *self.ivars().note.borrow_mut() = Some(note);
     }

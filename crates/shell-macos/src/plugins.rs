@@ -142,7 +142,7 @@ static ALL: &[Entry] = &[
     Entry {
         meta: Meta {
             id: "clipboard",
-            name: "Clipboard history",
+            name: "Clipboard",
             blurb: "Keeps what you copy on this Mac; type “clip”. Checks the clipboard about once a second. Skips password managers.",
             default_on: false,
         },
