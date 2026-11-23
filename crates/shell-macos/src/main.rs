@@ -10,6 +10,7 @@
 
 mod apps;
 mod ask;
+mod brew;
 mod clipboard;
 mod config;
 mod files;
@@ -46,6 +47,34 @@ fn diagnostics(args: &[String]) -> bool {
         let list: Vec<(String, String)> = items.iter().map(|i| (i.title.clone(), i.id.clone())).collect();
         theme::diagnose(&list, &args[2]);
         eprintln!("wrote {}", args[2]);
+        return true;
+    }
+    if args.len() >= 2 && args[1] == "--brew-index" {
+        // rusty-spotlight --brew-index   fetch Homebrew's catalogue and write the search index.
+        // The launcher runs this as a child, so the 50 MB of JSON never sit in its own memory.
+        match brew::build_index() {
+            Ok(n) => eprintln!("indexed {n} packages"),
+            Err(e) => {
+                eprintln!("brew index: {e}");
+                std::process::exit(1);
+            }
+        }
+        return true;
+    }
+    if args.len() >= 3 && args[1] == "--brew" {
+        // rusty-spotlight --brew <query>   show how packages rank for a query
+        let Some(catalogue) = brew::load() else {
+            eprintln!("no index yet; run --brew-index");
+            return true;
+        };
+        let t = Instant::now();
+        let found = launcher_core::brew::search(&args[2], &catalogue.packages, 8);
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        for i in found {
+            let p = &catalogue.packages[i];
+            println!("{}\t{}\t{}\t{}{}", p.installs, if p.cask { "cask" } else { "formula" }, p.token, p.desc, if catalogue.installed(p) { "  [installed]" } else { "" });
+        }
+        eprintln!("{} packages searched in {ms:.2} ms", catalogue.packages.len());
         return true;
     }
     if args.len() >= 2 && args[1] == "--plugins" {

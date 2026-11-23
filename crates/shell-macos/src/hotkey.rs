@@ -113,16 +113,18 @@ pub fn from_event(flags: NSEventModifierFlags, keycode: u16) -> Result<Shortcut,
 pub enum Mode {
     Clipboard,
     Files,
+    Brew,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 2] = [Mode::Clipboard, Mode::Files];
+    pub const ALL: [Mode; 3] = [Mode::Clipboard, Mode::Files, Mode::Brew];
 
     /// The plugin's id, as in `[plugins.<id>]`.
     pub fn id(self) -> &'static str {
         match self {
             Mode::Clipboard => "clipboard",
             Mode::Files => "files",
+            Mode::Brew => "brew",
         }
     }
 
@@ -131,6 +133,7 @@ impl Mode {
         match self {
             Mode::Clipboard => "clipboard history",
             Mode::Files => "file search",
+            Mode::Brew => "Homebrew search",
         }
     }
 }

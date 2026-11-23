@@ -34,7 +34,7 @@ use objc2_foundation::{
 };
 
 use crate::hotkey::Mode;
-use crate::{apps, ask, clipboard, config, files, plugins, store};
+use crate::{apps, ask, brew, clipboard, config, files, plugins, store};
 
 // Sizes in points, measured from Spotlight (docs/REQUIREMENTS.md, section 5.5).
 const PANEL_W: f64 = 640.0;
@@ -282,6 +282,9 @@ enum Kind {
     Clip { id: String, pinned: bool, image: bool, icon_path: Option<String> },
     /// A file or folder from Spotlight. Return opens it.
     File { path: String },
+    /// A Homebrew formula or cask. Return installs it, or opens its page
+    /// when it is installed already.
+    Brew { token: String, cask: bool, installed: bool, homepage: String },
     /// A line of explanation. Return does nothing.
     Hint,
     /// One of the selected row's actions, listed by Command-K (FR-40).
@@ -301,6 +304,8 @@ enum Act {
     PinClip(String),
     DeleteClip(String),
     ClearClips,
+    OpenUrl(String),
+    Brew { verb: brew::Verb, token: String, title: String, cask: bool },
 }
 
 /// One presented row. Return, click and the completion all act on this, never
@@ -322,6 +327,8 @@ impl Row {
             Kind::Ask { pending: true, .. } => "",
             Kind::Ask { .. } => "Ask",
             Kind::Notice { .. } | Kind::File { .. } => "Open",
+            Kind::Brew { installed: false, .. } => "Install",
+            Kind::Brew { ref homepage, .. } => if homepage.is_empty() { "" } else { "Open Page" },
             Kind::Hint => "",
             Kind::Action { .. } => "Run",
         }
@@ -401,6 +408,12 @@ pub struct State {
     file_cache: RefCell<HashMap<String, Vec<files::Hit>>>,
     file_gen: Cell<u64>,
     file_timer: RefCell<Option<Retained<NSTimer>>>,
+    /// Homebrew's catalogue, held only while the panel shows a brew search.
+    brew_data: RefCell<Option<brew::Catalogue>>,
+    /// An install, removal or upgrade in progress, and how the last one ended.
+    brew_job: RefCell<Option<brew::Job>>,
+    brew_done: RefCell<Option<(bool, String, String)>>,
+    brew_timer: RefCell<Option<Retained<NSTimer>>>,
     thumbs: RefCell<HashMap<String, Retained<NSImage>>>,
     /// Height animation in flight: (from, to, start time), stepped by `spring_timer`.
     spring: Cell<Option<(f64, f64, std::time::Instant)>>,
@@ -505,6 +518,11 @@ define_class!(
             if clipboard::poll() && self.ivars().mode.get() == Some(Mode::Clipboard) && self.ivars().panel.isVisible() {
                 self.present_inner(false);
             }
+        }
+
+        #[unsafe(method(brewTick:))]
+        fn brew_tick(&self, _timer: Option<&AnyObject>) {
+            self.poll_brew();
         }
 
         #[unsafe(method(fileTick:))]
@@ -843,6 +861,10 @@ impl Controller {
             file_cache: RefCell::new(HashMap::new()),
             file_gen: Cell::new(0),
             file_timer: RefCell::new(None),
+            brew_data: RefCell::new(None),
+            brew_job: RefCell::new(None),
+            brew_done: RefCell::new(None),
+            brew_timer: RefCell::new(None),
             thumbs: RefCell::new(HashMap::new()),
             spring: Cell::new(None),
             spring_timer: RefCell::new(None),
@@ -899,6 +921,7 @@ impl Controller {
             None => "Search",
             Some(Mode::Clipboard) => "Clipboard history",
             Some(Mode::Files) => "Files and folders",
+            Some(Mode::Brew) => "Homebrew packages",
         })));
         let t = std::time::Instant::now();
         if config::changed_since(s.config_modified.get()) {
@@ -1086,7 +1109,13 @@ impl Controller {
     pub fn dismiss(&self) {
         self.cancel_ask();
         self.cancel_files();
+        // How a brew job ended has been seen once it was on screen.
+        if self.showing_brew() {
+            self.ivars().brew_done.borrow_mut().take();
+        }
         let s = self.ivars();
+        // The catalogue is only held while a brew search is open.
+        s.brew_data.borrow_mut().take();
         s.mode.set(None);
         let panel = s.panel.clone();
         if panel.isVisible() {
@@ -1357,7 +1386,19 @@ impl Controller {
             (plugins.on("files"), plugins.on("clipboard"))
         };
         let mode = s.mode.get();
-        let rows = if clips && (mode == Some(Mode::Clipboard) || (mode.is_none() && clipboard::keyword_filter(&query).is_some())) {
+        let brew_term = if !s.plugins.borrow().on("brew") {
+            None
+        } else if mode == Some(Mode::Brew) {
+            Some(query.trim().to_string())
+        } else if mode.is_none() {
+            brew::keyword(&query)
+        } else {
+            None
+        };
+        let rows = if let Some(term) = brew_term {
+            self.cancel_files();
+            self.brew_rows(&term)
+        } else if clips && (mode == Some(Mode::Clipboard) || (mode.is_none() && clipboard::keyword_filter(&query).is_some())) {
             self.cancel_files();
             self.clipboard_rows(&query)
         } else if search_files {
@@ -1381,6 +1422,16 @@ impl Controller {
             s.selected.set(if len == 0 { 0 } else { index.min(len - 1) });
         } else {
             s.selected.set(0);
+        }
+        // A line of explanation above results (a brew job's progress) is not
+        // what Return should land on.
+        {
+            let rows = s.rows.borrow();
+            if rows.get(s.selected.get()).is_some_and(|r| matches!(r.kind, Kind::Hint)) {
+                if let Some(first) = rows.iter().position(|r| !matches!(r.kind, Kind::Hint)) {
+                    s.selected.set(first);
+                }
+            }
         }
         s.actions.borrow_mut().take();
         self.show_rows();
@@ -1450,6 +1501,145 @@ impl Controller {
             self.cancel_files();
         }
         rows
+    }
+
+    // ------------------------------------------------------------ homebrew
+
+    /// The rows of a brew search: what a job is doing or how it ended, then
+    /// the packages, best match and most installed first.
+    fn brew_rows(&self, term: &str) -> Vec<Row> {
+        let s = self.ivars();
+        if brew::program().is_none() {
+            return vec![Row { id: "brew:none".into(), title: "Homebrew is not installed".into(), subtitle: Some("See brew.sh to install it".into()), kind: Kind::Hint }];
+        }
+        let mut rows = Vec::new();
+        if let Some(job) = s.brew_job.borrow().as_ref() {
+            rows.push(Row { id: "brew:job".into(), title: format!("{} {}…", job.verb.doing(), job.title), subtitle: Some(job.last_line()).filter(|l| !l.is_empty()), kind: Kind::Hint });
+        } else if let Some((_, title, detail)) = s.brew_done.borrow().as_ref() {
+            rows.push(Row { id: "brew:done".into(), title: title.clone(), subtitle: Some(detail.clone()).filter(|d| !d.is_empty()), kind: Kind::Hint });
+        }
+        if s.brew_data.borrow().is_none() {
+            *s.brew_data.borrow_mut() = brew::load();
+        }
+        // A missing index is fetched now; an old one is refreshed behind this search.
+        let fetching = brew::refresh_if_stale();
+        if fetching {
+            self.arm_brew_timer();
+        }
+        let data = s.brew_data.borrow();
+        let Some(data) = data.as_ref() else {
+            let (title, detail) = if fetching {
+                ("Fetching the Homebrew catalogue…", "Once a week; it takes a few seconds")
+            } else {
+                ("The Homebrew catalogue could not be fetched", "Check the connection and type again")
+            };
+            rows.push(Row { id: "brew:wait".into(), title: title.into(), subtitle: Some(detail.into()), kind: Kind::Hint });
+            return rows;
+        };
+        let room = MAX_ROWS - rows.len();
+        let found = if term.is_empty() {
+            launcher_core::brew::popular(&data.packages, room)
+        } else {
+            launcher_core::brew::search(term, &data.packages, room)
+        };
+        if found.is_empty() {
+            rows.push(hint("brew:nothing", "No matching packages"));
+        }
+        for i in found {
+            let p = &data.packages[i];
+            let installed = data.installed(p);
+            let mut facts = Vec::new();
+            if installed {
+                facts.push("Installed".to_string());
+            }
+            if !p.name.is_empty() {
+                facts.push(p.token.clone());
+            }
+            facts.push((if p.cask { "Cask" } else { "Formula" }).to_string());
+            if p.installs > 0 {
+                facts.push(format!("{} installs a month", launcher_core::brew::short_count(p.installs)));
+            }
+            let subtitle = if p.desc.is_empty() { facts.join(" · ") } else { format!("{} · {}", p.desc, facts.join(" · ")) };
+            rows.push(Row {
+                id: format!("brew:{}:{}", if p.cask { 'c' } else { 'f' }, p.token),
+                title: p.title().to_string(),
+                subtitle: Some(subtitle),
+                kind: Kind::Brew { token: p.token.clone(), cask: p.cask, installed, homepage: p.homepage.clone() },
+            });
+        }
+        rows
+    }
+
+    fn arm_brew_timer(&self) {
+        let s = self.ivars();
+        if s.brew_timer.borrow().is_none() {
+            let timer = unsafe {
+                NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(0.25, self, sel!(brewTick:), None, true)
+            };
+            *s.brew_timer.borrow_mut() = Some(timer);
+        }
+    }
+
+    /// Whether the panel is showing a brew search right now.
+    fn showing_brew(&self) -> bool {
+        let s = self.ivars();
+        s.panel.isVisible() && s.actions.borrow().is_none() && s.rows.borrow().iter().any(|r| r.id.starts_with("brew:"))
+    }
+
+    /// Start an install, removal or upgrade. One at a time.
+    fn start_brew(&self, verb: brew::Verb, token: &str, title: &str, cask: bool) {
+        let s = self.ivars();
+        if s.brew_job.borrow().is_some() {
+            return;
+        }
+        s.brew_done.borrow_mut().take();
+        match brew::start(verb, token, title, cask) {
+            Ok(job) => {
+                event_log(&format!("brew: {}", brew::command_line(verb, token, cask)));
+                *s.brew_job.borrow_mut() = Some(job);
+                self.arm_brew_timer();
+            }
+            Err(e) => *s.brew_done.borrow_mut() = Some((false, format!("Could not {} {title}", verb.failed()), e)),
+        }
+        self.present_inner(true);
+    }
+
+    /// Called by the brew timer: follow a job's output, note how it ended,
+    /// and show the catalogue once it has been fetched.
+    fn poll_brew(&self) {
+        let s = self.ivars();
+        let mut repaint = false;
+        let ended = s.brew_job.borrow().as_ref().and_then(|job| job.finished().map(|ok| (ok, job.verb, job.title.clone(), job.token.clone(), job.last_line())));
+        if let Some((ok, verb, title, token, last)) = ended {
+            s.brew_job.borrow_mut().take();
+            event_log(&format!("brew: {} {token}: {}", verb.failed(), if ok { "done" } else { "failed" }));
+            let outcome = if ok {
+                (true, format!("{} {title}", verb.done()), String::new())
+            } else {
+                let why = if last.is_empty() { format!("Try “{}” in Terminal", brew::command_line(verb, &token, false)) } else { last };
+                (false, format!("Could not {} {title}", verb.failed()), why)
+            };
+            *s.brew_done.borrow_mut() = Some(outcome);
+            if let Some(data) = s.brew_data.borrow_mut().as_mut() {
+                data.rescan();
+            }
+            repaint = true;
+        } else if s.brew_job.borrow().is_some() {
+            repaint = true; // the line brew last printed
+        }
+        let waiting_for_index = s.brew_data.borrow().is_none();
+        let building = brew::building();
+        if waiting_for_index && !building {
+            repaint = true; // fetched, or failed: either way the row changes
+        }
+        if !building && s.brew_job.borrow().is_none() {
+            if let Some(timer) = s.brew_timer.borrow_mut().take() {
+                timer.invalidate();
+            }
+        }
+        if repaint && self.showing_brew() {
+            self.present_inner(false);
+        }
     }
 
     fn clipboard_rows(&self, query: &str) -> Vec<Row> {
@@ -1627,6 +1817,8 @@ impl Controller {
             Kind::Notice { path } => format!("Open {}", path.rsplit('/').next().unwrap_or(path)),
             Kind::Clip { .. } => "Copy".to_string(),
             Kind::File { .. } => format!("Open {}", row.title),
+            Kind::Brew { installed: false, .. } => format!("Install {}", row.title),
+            Kind::Brew { .. } => "Open Home Page".to_string(),
             Kind::Hint | Kind::Action { .. } => return Vec::new(),
         };
         let mut list = vec![action(0, primary, Act::Primary, "return")];
@@ -1663,6 +1855,18 @@ impl Controller {
                 add((if *pinned { "Unpin" } else { "Pin" }).into(), Act::PinClip(id.clone()), "pin");
                 add("Delete".into(), Act::DeleteClip(id.clone()), "trash");
                 add("Clear Unpinned".into(), Act::ClearClips, "trash");
+            }
+            Kind::Brew { token, cask, installed, homepage } => {
+                let job = |verb| Act::Brew { verb, token: token.clone(), title: row.title.clone(), cask: *cask };
+                if *installed {
+                    add(format!("Upgrade {}", row.title), job(brew::Verb::Upgrade), "arrow.up.circle");
+                    add(format!("Uninstall {}", row.title), job(brew::Verb::Uninstall), "trash");
+                } else if !homepage.is_empty() {
+                    add("Open Home Page".into(), Act::OpenUrl(homepage.clone()), "globe");
+                }
+                let verb = if *installed { brew::Verb::Upgrade } else { brew::Verb::Install };
+                let line = brew::command_line(verb, token, *cask);
+                add(format!("Copy “{line}”"), Act::Copy(line), "doc.on.doc");
             }
             Kind::File { path, .. } => {
                 add("Show in Finder".into(), Act::Reveal(path.clone()), "folder");
@@ -1707,6 +1911,16 @@ impl Controller {
                 }
                 *s.query.borrow_mut() = text;
                 self.start_ask(tool, question);
+            }
+            Act::OpenUrl(url) => {
+                self.dismiss();
+                if let Some(url) = NSURL::URLWithString(&ns(url)) {
+                    NSWorkspace::sharedWorkspace().openURL(&url);
+                }
+            }
+            Act::Brew { verb, token, title, cask } => {
+                self.leave_actions();
+                self.start_brew(*verb, token, title, *cask);
             }
             Act::PinClip(id) => {
                 clipboard::pin(id);
@@ -1760,6 +1974,8 @@ impl Controller {
                 Kind::Ask { pending: false, .. } => format!(" — {}", row.title),
                 Kind::Ask { .. } | Kind::Answer { .. } | Kind::Notice { .. } | Kind::Action { .. } | Kind::Hint => String::new(),
                 Kind::Clip { .. } | Kind::File { .. } => format!(" — {}", row.action()),
+                Kind::Brew { .. } if row.action().is_empty() => String::new(),
+                Kind::Brew { .. } => format!(" — {}", row.action()),
                 Kind::App { .. } => match completion(&query, &row.title) {
                     Some(rest) => format!("{rest} — {}", row.action()),
                     None => format!(" — {}", row.title),
@@ -1825,6 +2041,7 @@ impl Controller {
                 Kind::Notice { .. } => Subject::Notice,
                 Kind::Clip { .. } => Subject::Clip,
                 Kind::File { .. } => Subject::File,
+                Kind::Brew { .. } => Subject::Brew,
                 Kind::Hint => Subject::Nothing,
             },
         };
@@ -1930,6 +2147,20 @@ impl Controller {
                 NSWorkspace::sharedWorkspace().openURL(&NSURL::fileURLWithPath(&ns(path)));
                 return;
             }
+            Kind::Brew { token, cask, installed: false, .. } => {
+                // Stays open: the first row follows the install.
+                self.start_brew(brew::Verb::Install, token, &row.title, *cask);
+                return;
+            }
+            Kind::Brew { homepage, .. } => {
+                if homepage.starts_with("https://") || homepage.starts_with("http://") {
+                    self.dismiss();
+                    if let Some(url) = NSURL::URLWithString(&ns(homepage)) {
+                        NSWorkspace::sharedWorkspace().openURL(&url);
+                    }
+                }
+                return;
+            }
             Kind::Hint => return,
         }
 
@@ -1988,6 +2219,11 @@ impl Controller {
                     Kind::Ask { .. } => "sparkles",
                     Kind::Notice { .. } => "exclamationmark.triangle",
                     Kind::Clip { .. } => "doc.on.clipboard",
+                    Kind::Brew { installed: true, .. } => "checkmark.circle.fill",
+                    Kind::Brew { cask: true, .. } => "macwindow",
+                    Kind::Brew { .. } => "shippingbox",
+                    Kind::Hint if row.id == "brew:job" || row.id == "brew:wait" => "arrow.triangle.2.circlepath",
+                    Kind::Hint if row.id == "brew:done" => "checkmark.seal",
                     Kind::Hint => "info.circle",
                     _ => "globe",
                 };

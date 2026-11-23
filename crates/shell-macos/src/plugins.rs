@@ -148,6 +148,15 @@ static ALL: &[Entry] = &[
         },
         make: None,
     },
+    Entry {
+        meta: Meta {
+            id: "brew",
+            name: "Homebrew",
+            blurb: "“brew ripgrep” finds formulae and casks, most relevant and most installed first, and installs them. Fetches the catalogue once a week.",
+            default_on: false,
+        },
+        make: None,
+    },
 ];
 
 /// Every plugin's description, in order, for Settings.
@@ -583,7 +592,7 @@ mod tests {
         let c = Config::default();
         // What existed before plugins stays on; what records or searches starts off.
         let off: Vec<&str> = all().filter(|m| !is_on(&c, m.id)).map(|m| m.id).collect();
-        assert_eq!(off, ["files", "clipboard"]);
+        assert_eq!(off, ["files", "clipboard", "brew"]);
         assert!(is_on(&config("[plugins.files]\nenabled = true\n"), "files"));
         assert!(!is_on(&c, "no-such-plugin"));
         assert!(!is_on(&config("[plugins.time]\nenabled = false\n"), "time"));

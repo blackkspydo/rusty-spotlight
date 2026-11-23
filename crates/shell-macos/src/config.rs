@@ -164,7 +164,7 @@ grok = ["grok", "-p", "{question}", "--no-subagents"]
 # Each feature can be switched off, here or in Settings > Plugins. A feature
 # that is off does no work at all: no network, no background activity.
 # The features: apps, ask, websites, calculator, currency, units, time, and
-# two that start off: files and clipboard.
+# three that start off: files, clipboard and brew.
 # [plugins.currency]
 # enabled = false
 
@@ -175,6 +175,14 @@ grok = ["grok", "-p", "{question}", "--no-subagents"]
 # [plugins.files]
 # enabled = true
 # ambient = false
+# hotkey = ""
+
+# Homebrew: "brew ripgrep" searches every formula and cask, the best match and
+# the most installed first; Return installs. The catalogue (about 50 MB) is
+# fetched once a week, by a helper that exits when it is done, and only when
+# you use a brew search.
+# [plugins.brew]
+# enabled = true
 # hotkey = ""
 
 # Clipboard history: text, images and copied files, kept on this Mac. Type

@@ -68,7 +68,7 @@ Open Settings from the menu bar icon, by typing `settings` in the launcher, or b
 
 ## Plugins
 
-Every feature is a plugin. Settings › Plugins lists them down the left; each has its own page with its switch and its settings (aliases under Apps, keywords under Websites, the default currency under Currency, and so on). The plugins: Apps, Ask, Websites, Calculator, Currency, Units and World time start on; Files and Clipboard history start off. A plugin that is off does no work at all. With Currency off, for example, no exchange rate is ever fetched or read from disk, and `100 usd` shows nothing.
+Every feature is a plugin. Settings › Plugins lists them down the left; each has its own page with its switch and its settings (aliases under Apps, keywords under Websites, the default currency under Currency, and so on). The plugins: Apps, Ask, Websites, Calculator, Currency, Units and World time start on; Files, Clipboard and Homebrew start off. A plugin that is off does no work at all. With Currency off, for example, no exchange rate is ever fetched or read from disk, and `100 usd` shows nothing.
 
 The same switch in the configuration file:
 
@@ -86,9 +86,17 @@ Clipboard history, while on:
 
 Switching it off stops the checking at once. What was already saved stays on disk until you clear it with Command-K › Clear Unpinned, or delete that folder.
 
+### Homebrew
+
+Off until you switch it on. `brew ripgrep` searches every Homebrew formula and cask and lists the best matches, ordered by how well the name matches and then by how many people installed it in the last 30 days. Return installs the selected package and the first row follows the progress; on a package you already have, Return opens its home page. Command-K offers Upgrade, Uninstall, the home page, and the `brew` command to copy.
+
+- The catalogue (about 50 MB from formulae.brew.sh) is fetched once a week, only when you use a brew search, by a helper process that boils it down to a 1.6 MB index and exits. The launcher's own memory does not grow.
+- An install that needs your password (some casks) fails rather than hanging; copy the command and run it in Terminal.
+- `rusty-spotlight --brew git` prints how packages rank for a query.
+
 ### A shortcut of its own
 
-Clipboard history and file search can each have their own shortcut, which opens the panel straight into that plugin: everything you type searches it, with no `clip` or `file` first. Record them on the plugin's page in Settings › Plugins, or set `hotkey` in the plugin's table:
+Clipboard history, file search and Homebrew search can each have their own shortcut, which opens the panel straight into that plugin: everything you type searches it, with no `clip` or `file` first. Record them on the plugin's page in Settings › Plugins, or set `hotkey` in the plugin's table:
 
 ```toml
 [plugins.files]

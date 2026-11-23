@@ -63,6 +63,8 @@ struct Controls {
     clipboard_note: Option<Retained<NSTextField>>,
     files_key: Option<Retained<NSButton>>,
     files_note: Option<Retained<NSTextField>>,
+    brew_key: Option<Retained<NSButton>>,
+    brew_note: Option<Retained<NSTextField>>,
     /// How long clipboard history keeps unpinned items.
     keep: Option<Retained<NSPopUpButton>>,
     search_files: Option<Retained<NSButton>>,
@@ -293,6 +295,11 @@ define_class!(
             }
         }
 
+        #[unsafe(method(recordBrew:))]
+        fn record_brew(&self, _sender: Option<&AnyObject>) {
+            start_recording(Some(Mode::Brew));
+        }
+
         #[unsafe(method(recordFiles:))]
         fn record_files(&self, _sender: Option<&AnyObject>) {
             start_recording(Some(Mode::Files));
@@ -432,6 +439,7 @@ fn mode_button(c: &Controls, mode: Mode) -> Option<&Retained<NSButton>> {
     match mode {
         Mode::Clipboard => c.clipboard.as_ref(),
         Mode::Files => c.files_key.as_ref(),
+        Mode::Brew => c.brew_key.as_ref(),
     }
 }
 
@@ -439,6 +447,7 @@ fn mode_hint(mode: Mode) -> &'static str {
     match mode {
         Mode::Clipboard => CLIP_HINT,
         Mode::Files => FILES_HINT,
+        Mode::Brew => BREW_HINT,
     }
 }
 
@@ -528,11 +537,14 @@ const CLIP_HINT: &str = "Click to record a shortcut that opens the panel straigh
 
 const FILES_HINT: &str = "Click to record a shortcut that opens the panel straight into file search, with no “file” to type first.";
 
+const BREW_HINT: &str = "Click to record a shortcut that opens the panel straight into Homebrew search, with no “brew” to type first.";
+
 fn note_mode(mode: Mode, text: &str, warning: bool) {
     CONTROLS.with_borrow(|c| {
         let note = match mode {
             Mode::Clipboard => &c.clipboard_note,
             Mode::Files => &c.files_note,
+            Mode::Brew => &c.brew_note,
         };
         if let Some(note) = note {
             note.setStringValue(&ns(text));
@@ -1036,6 +1048,7 @@ fn plugin_symbol(id: &str) -> &'static str {
         "time" => "clock.fill",
         "files" => "folder.fill",
         "clipboard" => "doc.on.clipboard.fill",
+        "brew" => "shippingbox.fill",
         _ => "puzzlepiece.extension.fill",
     }
 }
@@ -1192,6 +1205,16 @@ fn plugin_pane(index: usize, meta: &crate::plugins::Meta, mtm: MainThreadMarker)
                 c.clipboard = Some(clipboard);
                 c.clipboard_note = Some(clipboard_note);
                 c.keep = Some(keep);
+            });
+        }
+        "brew" => {
+            let (brew_key, brew_note) = shortcut(&mut f, sel!(recordBrew:), BREW_HINT);
+            f.row("", &label("Return installs the selected package. Command-K offers Upgrade, Uninstall, the home page, and the command to copy.", 12.0, true, mtm), PANE_W - PANE_LABEL_W - 42.0, 32.0);
+            f.gap(8.0);
+            f.note("Results are ordered by how well the name matches, then by installs over the last 30 days, from Homebrew’s public figures. An install that needs your password has to be run in Terminal.");
+            CONTROLS.with_borrow_mut(|c| {
+                c.brew_key = Some(brew_key);
+                c.brew_note = Some(brew_note);
             });
         }
         _ => {
