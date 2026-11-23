@@ -79,6 +79,9 @@ impl History {
             .and_then(|b| serde_json::from_slice::<Vec<Entry>>(&b).ok())
             .unwrap_or_default()
             .into_iter()
+            // A blob name is joined to the items folder, read and deleted:
+            // one that is not a plain file name of ours is not trusted.
+            .filter(|e| e.blob.as_deref().is_none_or(safe_blob))
             .filter(|e| e.blob.as_ref().is_none_or(|name| dir.join("items").join(name).is_file()) || e.kind == ClipKind::Files)
             .collect();
         let mut history = Self { dir, entries };
@@ -229,8 +232,14 @@ fn private(dir: &Path) {
     let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
 }
 
+/// A blob is `<digits>-<digits>.txt` or `.png`, nothing with a path in it.
+fn safe_blob(name: &str) -> bool {
+    let Some((stem, ext)) = name.split_once('.') else { return false };
+    !stem.is_empty() && stem.chars().all(|c| c.is_ascii_digit() || c == '-') && matches!(ext, "txt" | "png")
+}
+
 fn delete_blob(dir: &Path, entry: &Entry) {
-    let Some(name) = &entry.blob else { return };
+    let Some(name) = entry.blob.as_ref().filter(|name| safe_blob(name)) else { return };
     let items = dir.join("items");
     let _ = std::fs::remove_file(items.join(name));
     if let Some(stem) = name.split('.').next() {
@@ -264,6 +273,8 @@ thread_local! {
     static KEEP_DAYS: Cell<u32> = const { Cell::new(30) };
     /// Bundle identifiers whose copies are never recorded.
     static IGNORED_APPS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// Whether an ignored app was in front at the previous check.
+    static IGNORED_BEFORE: Cell<bool> = const { Cell::new(false) };
     /// Images being resized off the main thread.
     static PENDING: RefCell<Vec<Receiver<Option<Entry>>>> = const { RefCell::new(Vec::new()) };
 }
@@ -338,7 +349,7 @@ pub fn clear_unpinned() {
 pub fn thumb_path(id: &str) -> Option<PathBuf> {
     history(|history| {
         let entry = history.get(id)?;
-        let name = entry.blob.as_ref()?.trim_end_matches(".png");
+        let name = entry.blob.as_ref().filter(|name| safe_blob(name))?.trim_end_matches(".png");
         let path = history.dir.join("items").join(format!("{name}.thumb.png"));
         path.is_file().then_some(path)
     })
@@ -367,13 +378,18 @@ pub fn poll() -> bool {
         history(|h| h.insert(entry));
         stored = true;
     }
+    // The copy may have been made up to a second ago, in an app that is no
+    // longer in front: an ignored app at this check or the one before counts.
+    let ignored_now = from_ignored_app();
+    let ignored = ignored_now || IGNORED_BEFORE.replace(ignored_now);
+    IGNORED_BEFORE.set(ignored_now);
     let pasteboard = NSPasteboard::generalPasteboard();
     let count = pasteboard.changeCount();
     if count == LAST.get() {
         return stored;
     }
     LAST.set(count);
-    if count == SUPPRESS.get() || from_ignored_app() {
+    if count == SUPPRESS.get() || ignored {
         return stored;
     }
     match capture(&pasteboard) {
@@ -462,7 +478,7 @@ pub fn copy_entry(id: &str) -> Result<(), String> {
 }
 
 fn blob_path(entry: &Entry) -> Option<PathBuf> {
-    let name = entry.blob.as_ref()?;
+    let name = entry.blob.as_ref().filter(|name| safe_blob(name))?;
     history(|h| {
         let path = h.dir.join("items").join(name);
         path.is_file().then_some(path)
@@ -774,6 +790,30 @@ mod tests {
         assert!(!active());
         assert!(!poll());
         assert!(HISTORY.with_borrow(Option::is_none));
+    }
+
+    #[test]
+    fn only_our_own_file_names_are_trusted_as_blobs() {
+        for ok in ["1795452024220-1.txt", "1795452024220-12.png"] {
+            assert!(safe_blob(ok), "{ok}");
+        }
+        for bad in ["../../../.ssh/id_rsa", "a/b.txt", "..", "x.sh", "1-1.txt/../../x", ".txt", "1-1.thumb.png"] {
+            assert!(!safe_blob(bad), "{bad}");
+        }
+        // An index naming a file outside the folder loses that entry on load,
+        // and the file is left alone.
+        let dir = std::env::temp_dir().join(format!("rs-clip-blob-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("items")).unwrap();
+        let outside = dir.join("precious.txt");
+        std::fs::write(&outside, "keep me").unwrap();
+        let mut bad = entry(ClipKind::Text, "evil", 1.0, false);
+        bad.blob = Some("../precious.txt".into());
+        std::fs::write(dir.join("index.json"), serde_json::to_vec(&vec![bad]).unwrap()).unwrap();
+        KEEP_DAYS.set(30); // the entry is old: it would be evicted, and its blob deleted
+        let history = History::open(dir);
+        assert!(history.entries.is_empty());
+        assert!(outside.is_file(), "a file outside items/ must never be deleted");
     }
 
     #[test]

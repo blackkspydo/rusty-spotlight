@@ -1939,6 +1939,9 @@ impl Controller {
                 self.start_ask(tool, question);
             }
             Act::OpenUrl(url) => {
+                if !brew::web_address(url) {
+                    return;
+                }
                 self.dismiss();
                 if let Some(url) = NSURL::URLWithString(&ns(url)) {
                     NSWorkspace::sharedWorkspace().openURL(&url);
@@ -2179,7 +2182,7 @@ impl Controller {
                 return;
             }
             Kind::Brew { homepage, .. } => {
-                if homepage.starts_with("https://") || homepage.starts_with("http://") {
+                if brew::web_address(homepage) {
                     self.dismiss();
                     if let Some(url) = NSURL::URLWithString(&ns(homepage)) {
                         NSWorkspace::sharedWorkspace().openURL(&url);

@@ -250,7 +250,20 @@ impl Catalogue {
 /// Read the index. `None` until it has been built once.
 pub fn load() -> Option<Catalogue> {
     let text = std::fs::read_to_string(index_path()?).ok()?;
-    let packages = parse_index(&text);
+    // The index is a file anyone running as this user could have edited, and
+    // its text came off the network. A token is later shown as a command to
+    // copy, and a home page is opened: only plain names and web addresses
+    // get past this point.
+    let packages: Vec<Package> = parse_index(&text)
+        .into_iter()
+        .filter(|p| valid_token(&p.token))
+        .map(|mut p| {
+            if !web_address(&p.homepage) {
+                p.homepage.clear();
+            }
+            p
+        })
+        .collect();
     if packages.is_empty() {
         return None;
     }
@@ -351,6 +364,11 @@ impl Job {
     }
 }
 
+/// Only http and https addresses are ever opened.
+pub fn web_address(url: &str) -> bool {
+    (url.starts_with("https://") || url.starts_with("http://")) && !url.contains(char::is_whitespace)
+}
+
 /// Only names Homebrew itself could have given are ever passed to `brew`.
 fn valid_token(token: &str) -> bool {
     !token.is_empty()
@@ -443,6 +461,10 @@ mod tests {
         }
         for bad in ["", "--force", "-v", "a b", "x;rm -rf /", "$(id)", "a/b"] {
             assert!(!valid_token(bad), "{bad}");
+        }
+        assert!(web_address("https://git-scm.com") && web_address("http://x.test/a"));
+        for bad in ["file:///etc/passwd", "javascript:alert(1)", "", "https://a b", "ssh://host"] {
+            assert!(!web_address(bad), "{bad}");
         }
         assert_eq!(command_line(Verb::Install, "iterm2", true), "brew install --cask iterm2");
         assert_eq!(command_line(Verb::Upgrade, "git", false), "brew upgrade git");
