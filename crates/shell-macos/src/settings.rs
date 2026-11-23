@@ -63,6 +63,8 @@ struct Controls {
     clipboard_note: Option<Retained<NSTextField>>,
     files_key: Option<Retained<NSButton>>,
     files_note: Option<Retained<NSTextField>>,
+    /// How long clipboard history keeps unpinned items.
+    keep: Option<Retained<NSPopUpButton>>,
     search_files: Option<Retained<NSButton>>,
 }
 
@@ -77,6 +79,12 @@ thread_local! {
     static CONTROLS: RefCell<Controls> = RefCell::new(Controls::default());
     static PREVIEW: RefCell<Option<theme::Tint>> = const { RefCell::new(None) };
     static LISTS: RefCell<Vec<Retained<PairList>>> = const { RefCell::new(Vec::new()) };
+    /// The Plugins tab: its list, the list's data source, one pane per
+    /// plugin, and which is showing.
+    static PLUGIN_TABLE: RefCell<Option<Retained<NSTableView>>> = const { RefCell::new(None) };
+    static PLUGIN_LIST: RefCell<Option<Retained<PluginList>>> = const { RefCell::new(None) };
+    static PLUGIN_PANES: RefCell<Vec<Retained<NSView>>> = const { RefCell::new(Vec::new()) };
+    static PLUGIN_SHOWN: Cell<NSInteger> = const { Cell::new(0) };
     /// The local key monitor while a shortcut is being recorded.
     static RECORDING: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     /// The plugin whose shortcut is being recorded; `None` for the launcher's.
@@ -278,6 +286,13 @@ define_class!(
         #[unsafe(method(recordClipboard:))]
         fn record_clipboard(&self, _sender: Option<&AnyObject>) {
             start_recording(Some(Mode::Clipboard));
+        }
+
+        #[unsafe(method(keepChanged:))]
+        fn keep_changed(&self, sender: &NSPopUpButton) {
+            if let Some((_, days)) = KEEP.get(sender.indexOfSelectedItem() as usize) {
+                save("clipboard keep_days", || config::set_table_value("plugins.clipboard", "keep_days", &days.to_string()));
+            }
         }
 
         #[unsafe(method(recordFiles:))]
@@ -506,9 +521,9 @@ fn stop_recording(shortcut: Option<crate::hotkey::Shortcut>) {
 
 const SHORTCUT_HINT: &str = "Click to record a new shortcut. For Command-Space, first turn off Spotlight’s own in System Settings › Keyboard › Keyboard Shortcuts.";
 
-const CLIP_HINT: &str = "Needs the Clipboard history plugin. Click to record a shortcut that opens it; none is set until you do. For Shift-Command-Space, untick Ask Siri about active window under Keyboard Shortcuts › Screenshots.";
+const CLIP_HINT: &str = "Click to record a shortcut that opens the panel straight into clipboard history; none is set until you do. For Shift-Command-Space, untick Ask Siri about active window under Keyboard Shortcuts › Screenshots.";
 
-const FILES_HINT: &str = "Needs the Files plugin. Click to record a shortcut that opens straight into file search, with no “file” to type first.";
+const FILES_HINT: &str = "Click to record a shortcut that opens the panel straight into file search, with no “file” to type first.";
 
 fn note_mode(mode: Mode, text: &str, warning: bool) {
     CONTROLS.with_borrow(|c| {
@@ -710,6 +725,20 @@ fn sync_from(config: &config::Config) {
         for (button, meta) in c.plugins.iter().zip(crate::plugins::all()) {
             button.setState(state(crate::plugins::is_on(config, meta.id)));
         }
+        if let Some(p) = &c.keep {
+            // The nearest choice at or above what the file says; 0 is "until full".
+            let days = config.clipboard_keep_days();
+            let index = if days == 0 { KEEP.len() - 1 } else { KEEP.iter().position(|k| k.1 >= days).unwrap_or(KEEP.len() - 2) };
+            p.selectItemAtIndex(index as NSInteger);
+            p.setEnabled(crate::plugins::is_on(config, "clipboard"));
+        }
+        // The list shows which plugins are off.
+        PLUGIN_TABLE.with_borrow(|table| {
+            if let Some(table) = table {
+                table.reloadData();
+            }
+        });
+        select_plugin(PLUGIN_SHOWN.get());
         // A plugin's options stay visible but cannot be changed while it is off.
         if let Some(p) = &c.currency {
             p.setEnabled(crate::plugins::is_on(config, "currency"));
@@ -862,7 +891,7 @@ fn popup(items: &[&str], action: Sel, mtm: MainThreadMarker) -> Retained<NSPopUp
 // ---------------------------------------------------------------- tabs
 
 fn general(mtm: MainThreadMarker) -> Retained<NSViewController> {
-    let mut f = Form::new(590.0, mtm);
+    let mut f = Form::new(372.0, mtm);
     let shortcut = button("Command-Space", sel!(recordShortcut:), mtm);
     shortcut.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
     f.row("Shortcut:", &shortcut, 190.0, 28.0);
@@ -887,20 +916,6 @@ fn general(mtm: MainThreadMarker) -> Retained<NSViewController> {
     f.note("When it is hidden, type “settings” in Rusty Spotlight, or open the app again in Finder, to come back here.");
     f.gap(14.0);
 
-    let clipboard = button("None", sel!(recordClipboard:), mtm);
-    clipboard.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
-    f.row("Clipboard shortcut:", &clipboard, 190.0, 28.0);
-    let clipboard_note = f.note(CLIP_HINT);
-    f.gap(10.0);
-    let files_key = button("None", sel!(recordFiles:), mtm);
-    files_key.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
-    f.row("Files shortcut:", &files_key, 190.0, 28.0);
-    let files_note = f.note(FILES_HINT);
-    f.gap(10.0);
-    let search_files = checkbox("List file names under apps as you type", sel!(filesChanged:), mtm);
-    f.row("Files:", &search_files, 330.0, 20.0);
-    f.note("Needs the Files plugin. “file notes” and “folder notes” search without this; with it, names are also listed after two letters.");
-
     CONTROLS.with_borrow_mut(|c| {
         c.shortcut = Some(shortcut);
         c.shortcut_note = Some(shortcut_note);
@@ -909,11 +924,6 @@ fn general(mtm: MainThreadMarker) -> Retained<NSViewController> {
         c.login = Some(login);
         c.login_note = Some(login_note);
         c.menu_icon = Some(menu_icon);
-        c.clipboard = Some(clipboard);
-        c.clipboard_note = Some(clipboard_note);
-        c.files_key = Some(files_key);
-        c.files_note = Some(files_note);
-        c.search_files = Some(search_files);
     });
     f.controller("General")
 }
@@ -993,59 +1003,210 @@ fn appearance(mtm: MainThreadMarker) -> Retained<NSViewController> {
     f.controller("Appearance")
 }
 
-fn search(mtm: MainThreadMarker) -> Retained<NSViewController> {
-    let mut f = Form::new(560.0, mtm);
-    let currency = popup(CURRENCIES, sel!(currencyChanged:), mtm);
-    f.row("Default currency:", &currency, 230.0, 26.0);
-    f.note("Used when you name one currency, e.g. “100 usd”.");
-    f.gap(12.0);
-    let ask = popup(&[], sel!(askChanged:), mtm);
-    f.row("Ask with:", &ask, 150.0, 26.0);
-    f.note("“? question” goes to this tool; “?codex question” picks another.");
-    f.separator();
+/// Width of the list of plugins down the left of the Plugins tab.
+const SIDEBAR_W: f64 = 176.0;
+/// A plugin's settings are laid out as a tab is, and tucked this far under
+/// the empty left of its label column, so the tab is not needlessly wide.
+const PANE_INSET: f64 = 44.0;
+const PLUGINS_W: f64 = SIDEBAR_W + WIDTH - PANE_INSET;
+const PLUGINS_H: f64 = 370.0;
 
-    let aliases = PairList::new("aliases", mtm);
-    f.caption("Aliases:", 17.0);
-    aliases.build(&f, ("Type", "To open"), 130.0);
-    f.y += 130.0 + 28.0;
-    f.note("Typing the alias puts that app first, e.g. “ff” for Firefox.");
-    f.gap(12.0);
-    let links = PairList::new("links", mtm);
-    f.caption("Website keywords:", 17.0);
-    links.build(&f, ("Keyword", "Address"), 130.0);
-    f.y += 130.0 + 28.0;
-    f.note("“{query}” is replaced by what you type after the keyword: “gh rust-lang/rust”.");
+/// How long clipboard history keeps unpinned items: (menu title, keep_days).
+const KEEP: [(&str, u32); 6] = [("1 day", 1), ("1 week", 7), ("1 month", 30), ("3 months", 90), ("1 year", 365), ("Until the history is full", 0)];
 
-    CONTROLS.with_borrow_mut(|c| {
-        c.currency = Some(currency);
-        c.ask = Some(ask);
-    });
-    LISTS.set(vec![aliases, links]);
-    f.controller("Search")
+define_class!(
+    /// The list of plugins in the Plugins tab.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "RSPluginList"]
+    struct PluginList;
+
+    unsafe impl NSObjectProtocol for PluginList {}
+
+    unsafe impl NSTableViewDataSource for PluginList {
+        #[unsafe(method(numberOfRowsInTableView:))]
+        fn number_of_rows(&self, _table: &NSTableView) -> NSInteger {
+            crate::plugins::all().count() as NSInteger
+        }
+
+        #[unsafe(method_id(tableView:objectValueForTableColumn:row:))]
+        fn value(&self, _table: &NSTableView, _column: Option<&NSTableColumn>, row: NSInteger) -> Option<Retained<AnyObject>> {
+            plugin_title(row)
+        }
+    }
+
+    impl PluginList {
+        #[unsafe(method(pluginSelected:))]
+        fn plugin_selected(&self, sender: &NSTableView) {
+            select_plugin(sender.selectedRow());
+        }
+    }
+);
+
+/// A plugin's row in the list: its name, and whether it is off.
+fn plugin_title(row: NSInteger) -> Option<Retained<AnyObject>> {
+    let meta = crate::plugins::all().nth(usize::try_from(row).ok()?)?;
+    let on = controller().is_none_or(|c| crate::plugins::is_on(&c.config(), meta.id));
+    let title = if on { meta.name.to_string() } else { format!("{} — off", meta.name) };
+    Some(Retained::into_super(Retained::into_super(ns(&title))))
 }
 
-/// One switch per feature, each with a line saying what it does when on.
-fn plugins(mtm: MainThreadMarker) -> Retained<NSViewController> {
-    const LEFT: f64 = 44.0;
-    let width = WIDTH - LEFT * 2.0;
-    let metas: Vec<_> = crate::plugins::all().collect();
-    let mut f = Form::new(TOP + 44.0 + metas.len() as f64 * 62.0, mtm);
-    let intro = label("Switch off what you don't use. A plugin that is off does no work at all: nothing is fetched, watched or kept in memory.", 12.0, true, mtm);
-    f.place(&intro, LEFT, f.y, width, 32.0);
-    f.y += 44.0;
-    let mut buttons = Vec::new();
-    for (i, meta) in metas.iter().enumerate() {
-        let b = checkbox(meta.name, sel!(pluginChanged:), mtm);
+/// Show one plugin's settings beside the list.
+fn select_plugin(row: NSInteger) {
+    let count = crate::plugins::all().count() as NSInteger;
+    let row = if (0..count).contains(&row) { row } else { PLUGIN_SHOWN.get() };
+    PLUGIN_SHOWN.set(row);
+    PLUGIN_PANES.with_borrow(|panes| {
+        for (i, pane) in panes.iter().enumerate() {
+            pane.setHidden(i as NSInteger != row);
+        }
+    });
+    PLUGIN_TABLE.with_borrow(|table| {
+        if let Some(table) = table {
+            if table.selectedRow() != row {
+                let rows = objc2_foundation::NSIndexSet::indexSetWithIndex(row as usize);
+                table.selectRowIndexes_byExtendingSelection(&rows, false);
+            }
+        }
+    });
+}
+
+/// One plugin's pane: its switch, what it does, then its own settings.
+fn plugin_pane(index: usize, meta: &crate::plugins::Meta, mtm: MainThreadMarker) -> Form {
+    let mut f = Form::new(PLUGINS_H, mtm);
+    let switch = checkbox(&format!("Use {}", meta.name), sel!(pluginChanged:), mtm);
+    switch.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
+    switch.setTag(index as NSInteger);
+    f.row("", &switch, 330.0, 20.0);
+    f.note(meta.blurb);
+    f.separator();
+    CONTROLS.with_borrow_mut(|c| c.plugins.push(switch));
+    let shortcut = |f: &mut Form, action: Sel, hint: &str| {
+        let b = button("None", action, mtm);
         b.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
-        b.setTag(i as NSInteger);
-        f.place(&b, LEFT, f.y, width, 20.0);
-        let blurb = label(meta.blurb, 11.0, true, mtm);
-        f.place(&blurb, LEFT + 20.0, f.y + 22.0, width - 20.0, 30.0);
-        f.y += 62.0;
-        buttons.push(b);
+        f.row("Shortcut:", &b, 190.0, 28.0);
+        let note = f.note(hint);
+        f.gap(12.0);
+        (b, note)
+    };
+    match meta.id {
+        "apps" => {
+            let aliases = PairList::new("aliases", mtm);
+            f.caption("Aliases:", 17.0);
+            aliases.build(&f, ("Type", "To open"), 150.0);
+            f.y += 150.0 + 28.0;
+            f.note("Typing the alias puts that app first, e.g. “ff” for Firefox.");
+            LISTS.with_borrow_mut(|l| l.push(aliases));
+        }
+        "websites" => {
+            let links = PairList::new("links", mtm);
+            f.caption("Keywords:", 17.0);
+            links.build(&f, ("Keyword", "Address"), 150.0);
+            f.y += 150.0 + 28.0;
+            f.note("“{query}” is replaced by what you type after the keyword: “gh rust-lang/rust”.");
+            LISTS.with_borrow_mut(|l| l.push(links));
+        }
+        "ask" => {
+            let ask = popup(&[], sel!(askChanged:), mtm);
+            f.row("Ask with:", &ask, 150.0, 26.0);
+            f.note("“? question” goes to this tool; “?codex question” picks another. Add tools under [ask.tools] in the configuration file.");
+            CONTROLS.with_borrow_mut(|c| c.ask = Some(ask));
+        }
+        "currency" => {
+            let currency = popup(CURRENCIES, sel!(currencyChanged:), mtm);
+            f.row("Default currency:", &currency, 230.0, 26.0);
+            f.note("Used when you name one currency, e.g. “100 usd”.");
+            CONTROLS.with_borrow_mut(|c| c.currency = Some(currency));
+        }
+        "files" => {
+            let (files_key, files_note) = shortcut(&mut f, sel!(recordFiles:), FILES_HINT);
+            let ambient = checkbox("List file names under apps as you type", sel!(filesChanged:), mtm);
+            f.row("In search:", &ambient, 330.0, 20.0);
+            f.note("“file notes” and “folder notes” always search. With this, names are also listed under apps after two letters.");
+            CONTROLS.with_borrow_mut(|c| {
+                c.files_key = Some(files_key);
+                c.files_note = Some(files_note);
+                c.search_files = Some(ambient);
+            });
+        }
+        "clipboard" => {
+            let (clipboard, clipboard_note) = shortcut(&mut f, sel!(recordClipboard:), CLIP_HINT);
+            let titles: Vec<&str> = KEEP.iter().map(|k| k.0).collect();
+            let keep = popup(&titles, sel!(keepChanged:), mtm);
+            f.row("Keep for:", &keep, 210.0, 26.0);
+            f.note("Pinned items are kept until you unpin or delete them. Copies from password managers are never kept.");
+            CONTROLS.with_borrow_mut(|c| {
+                c.clipboard = Some(clipboard);
+                c.clipboard_note = Some(clipboard_note);
+                c.keep = Some(keep);
+            });
+        }
+        _ => {
+            f.note("Nothing to set.");
+        }
     }
-    CONTROLS.with_borrow_mut(|c| c.plugins = buttons);
-    f.controller("Plugins")
+    f
+}
+
+/// The plugins down the left; the selected one's switch and settings beside it.
+fn plugins(mtm: MainThreadMarker) -> Retained<NSViewController> {
+    let root = NSView::initWithFrame(NSView::alloc(mtm), NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(PLUGINS_W, PLUGINS_H)));
+    CONTROLS.with_borrow_mut(|c| c.plugins.clear());
+    LISTS.with_borrow_mut(Vec::clear);
+
+    let table = NSTableView::new(mtm);
+    let column = NSTableColumn::initWithIdentifier(NSTableColumn::alloc(mtm), &ns("plugin"));
+    column.setWidth(SIDEBAR_W - 36.0);
+    column.setEditable(false);
+    table.addTableColumn(&column);
+    table.setHeaderView(None);
+    table.setRowHeight(26.0);
+    table.setAllowsEmptySelection(false);
+    table.setAllowsMultipleSelection(false);
+    let list = PluginList::new(mtm);
+    unsafe {
+        let _: () = msg_send![&*table, setDataSource: &*list];
+        let target: &AnyObject = &list;
+        table.setTarget(Some(target));
+        table.setAction(Some(sel!(pluginSelected:)));
+    }
+    let scroll = NSScrollView::initWithFrame(
+        NSScrollView::alloc(mtm),
+        NSRect::new(NSPoint::new(16.0, 16.0), NSSize::new(SIDEBAR_W - 16.0, PLUGINS_H - 32.0)),
+    );
+    scroll.setDocumentView(Some(&table));
+    scroll.setHasVerticalScroller(true);
+    scroll.setBorderType(NSBorderType::BezelBorder);
+    root.addSubview(&scroll);
+
+    let mut panes = Vec::new();
+    for (i, meta) in crate::plugins::all().enumerate() {
+        let pane = plugin_pane(i, meta, mtm);
+        pane.view.setFrameOrigin(NSPoint::new(SIDEBAR_W - PANE_INSET, 0.0));
+        pane.view.setHidden(true);
+        root.addSubview(&pane.view);
+        panes.push(pane.view);
+    }
+    // The list goes in last, so it sits above the panes' empty left edge.
+    scroll.removeFromSuperview();
+    root.addSubview(&scroll);
+    PLUGIN_PANES.set(panes);
+    PLUGIN_TABLE.set(Some(table));
+    PLUGIN_LIST.set(Some(list));
+    select_plugin(PLUGIN_SHOWN.get());
+
+    let vc = NSViewController::new(mtm);
+    vc.setView(&root);
+    vc.setTitle(Some(&ns("Plugins")));
+    vc.setPreferredContentSize(NSSize::new(PLUGINS_W, PLUGINS_H));
+    vc
+}
+
+impl PluginList {
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(());
+        unsafe { msg_send![super(this), init] }
+    }
 }
 
 fn advanced(mtm: MainThreadMarker) -> Retained<NSViewController> {
@@ -1092,7 +1253,6 @@ fn build(mtm: MainThreadMarker) -> Retained<SettingsWindow> {
     for (vc, image) in [
         (general(mtm), "gearshape"),
         (appearance(mtm), "paintpalette"),
-        (search(mtm), "magnifyingglass"),
         (plugins(mtm), "puzzlepiece.extension"),
         (advanced(mtm), "wrench.and.screwdriver"),
     ] {
@@ -1328,10 +1488,15 @@ pub fn snapshot(controller: &Controller, dir: &str) {
             }
         }
     };
-    let tabs = [general(mtm), appearance(mtm), search(mtm), plugins(mtm), advanced(mtm)];
+    let tabs = [general(mtm), appearance(mtm), plugins(mtm), advanced(mtm)];
     sync_from(&controller.config());
-    for (vc, name) in tabs.iter().zip(["general", "appearance", "search", "plugins", "advanced"]) {
+    for (vc, name) in tabs.iter().zip(["general", "appearance", "plugins", "advanced"]) {
         save_png(&vc.view(), &format!("settings-{name}.png"));
+    }
+    // The Plugins tab once per plugin, each with its own settings showing.
+    for (i, meta) in crate::plugins::all().enumerate() {
+        select_plugin(i as NSInteger);
+        save_png(&tabs[2].view(), &format!("settings-plugin-{}.png", meta.id));
     }
     if let Some(image) = symbol("magnifyingglass", 14.0) {
         image.setTemplate(true);

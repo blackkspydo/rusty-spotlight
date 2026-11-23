@@ -55,7 +55,7 @@ Press **Option-Space** to open it. That is the shortcut until you choose another
 1. **Allow Input Monitoring.** macOS asks once whether Rusty Spotlight may receive keystrokes. Allow it in System Settings › Privacy & Security › Input Monitoring. The shortcut works without it, but other apps that watch the keyboard can then delay or swallow it. Rusty Spotlight only watches for its own shortcut and stores nothing you type.
 2. **Choose the shortcut** in Settings › General: click the shortcut button and press the keys you want. It applies at once.
 3. **To use Command-Space,** first turn off Spotlight's own shortcut: System Settings › Keyboard › Keyboard Shortcuts… › Spotlight › untick "Show Spotlight search". Then record Command-Space in Settings.
-4. **Clipboard history** is off until you tick it in Settings › Plugins. It then has no shortcut until you record one in Settings › General; until then, type `clip`. Return copies the item; paste it afterwards with Command-V. For Shift-Command-Space, first untick "Ask Siri about active window" under Keyboard Shortcuts › Screenshots.
+4. **Clipboard history** is off until you tick it in Settings › Plugins. It then has no shortcut until you record one on the same page; until then, type `clip`. Return copies the item; paste it afterwards with Command-V. For Shift-Command-Space, first untick "Ask Siri about active window" under Keyboard Shortcuts › Screenshots.
 5. **File search** is off until you tick Files in Settings › Plugins. Names come from Spotlight. Desktop, Documents and Downloads stay hidden until Rusty Spotlight is allowed under System Settings › Privacy & Security › Files and Folders.
 
 Open Settings from the menu bar icon, by typing `settings` in the launcher, or by opening the app again from Finder. From Settings you can also:
@@ -68,7 +68,7 @@ Open Settings from the menu bar icon, by typing `settings` in the launcher, or b
 
 ## Plugins
 
-Every feature is a plugin you can switch on or off in Settings › Plugins: Apps, Ask, Websites, Calculator, Currency, Units and World time start on; Files and Clipboard history start off. A plugin that is off does no work at all. With Currency off, for example, no exchange rate is ever fetched or read from disk, and `100 usd` shows nothing.
+Every feature is a plugin. Settings › Plugins lists them down the left; each has its own page with its switch and its settings (aliases under Apps, keywords under Websites, the default currency under Currency, and so on). The plugins: Apps, Ask, Websites, Calculator, Currency, Units and World time start on; Files and Clipboard history start off. A plugin that is off does no work at all. With Currency off, for example, no exchange rate is ever fetched or read from disk, and `100 usd` shows nothing.
 
 The same switch in the configuration file:
 
@@ -88,7 +88,7 @@ Switching it off stops the checking at once. What was already saved stays on dis
 
 ### A shortcut of its own
 
-Clipboard history and file search can each have their own shortcut, which opens the panel straight into that plugin: everything you type searches it, with no `clip` or `file` first. Record them in Settings › General, or set `hotkey` in the plugin's table:
+Clipboard history and file search can each have their own shortcut, which opens the panel straight into that plugin: everything you type searches it, with no `clip` or `file` first. Record them on the plugin's page in Settings › Plugins, or set `hotkey` in the plugin's table:
 
 ```toml
 [plugins.files]
@@ -110,7 +110,7 @@ Pressing the shortcut again closes the panel; pressing another plugin's shortcut
 | `?codex question` | [Codex CLI](https://github.com/openai/codex) | `codex` on your PATH |
 | `?grok question` | Grok CLI | `grok` on your PATH |
 
-To change the default tool, use Settings › Search. To add a tool or change a path, edit `[ask.tools]` in the configuration file. Without any of these tools, everything else still works.
+To change the default tool, use Settings › Plugins › Ask. To add a tool or change a path, edit `[ask.tools]` in the configuration file. Without any of these tools, everything else still works.
 
 ## Configuration
 
