@@ -10,9 +10,13 @@
 
 mod apps;
 mod ask;
+mod brew;
+mod clipboard;
 mod config;
+mod files;
 mod hotkey;
 mod keytap;
+mod plugins;
 mod rates;
 mod settings;
 mod spaces;
@@ -43,6 +47,54 @@ fn diagnostics(args: &[String]) -> bool {
         let list: Vec<(String, String)> = items.iter().map(|i| (i.title.clone(), i.id.clone())).collect();
         theme::diagnose(&list, &args[2]);
         eprintln!("wrote {}", args[2]);
+        return true;
+    }
+    if args.len() >= 2 && args[1] == "--brew-index" {
+        // rusty-spotlight --brew-index   fetch Homebrew's catalogue and write the search index.
+        // The launcher runs this as a child, so the 50 MB of JSON never sit in its own memory.
+        match brew::build_index() {
+            Ok(n) => eprintln!("indexed {n} packages"),
+            Err(e) => {
+                eprintln!("brew index: {e}");
+                std::process::exit(1);
+            }
+        }
+        return true;
+    }
+    if args.len() >= 3 && args[1] == "--brew" {
+        // rusty-spotlight --brew <query>   show how packages rank for a query
+        let Some(catalogue) = brew::load() else {
+            eprintln!("no index yet; run --brew-index");
+            return true;
+        };
+        let t = Instant::now();
+        let found = launcher_core::brew::search(&args[2], &catalogue.packages, 8);
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        for i in found {
+            let p = &catalogue.packages[i];
+            println!("{}\t{}\t{}\t{}{}", p.installs, if p.cask { "cask" } else { "formula" }, p.token, p.desc, if catalogue.installed(p) { "  [installed]" } else { "" });
+        }
+        eprintln!("{} packages searched in {ms:.2} ms", catalogue.packages.len());
+        return true;
+    }
+    if args.len() >= 2 && args[1] == "--plugins" {
+        // rusty-spotlight --plugins [query]   which plugins are on, and the row a query leads to
+        let config = config::load(None).config;
+        let mut registry = plugins::Registry::default();
+        registry.configure(&config);
+        for meta in plugins::all() {
+            println!("{}\t{}", if registry.on(meta.id) { "on " } else { "off" }, meta.id);
+        }
+        if let Some(text) = args.get(2) {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            let t = Instant::now();
+            let answer = registry.special(&plugins::Query { text: text.trim(), now, zone: &ui::zone_offset });
+            let us = t.elapsed().as_secs_f64() * 1e6;
+            match answer {
+                Some(a) => println!("{}\t{}\t({us:.0} µs)", a.id, a.title),
+                None => println!("no plugin answers\t({us:.0} µs)"),
+            }
+        }
         return true;
     }
     if args.len() < 2 || (args[1] != "--apps" && args[1] != "--rank") {
@@ -82,6 +134,22 @@ fn toggle_panel() {
     }
 }
 
+/// The panel hid itself (a click elsewhere, another app taking the keyboard):
+/// let go of what is only held while it is open.
+pub(crate) fn panel_hidden() {
+    let controller = CONTROLLER.with_borrow(|c| c.clone());
+    if let Some(controller) = controller {
+        controller.dismiss();
+    }
+}
+
+fn show_mode(mode: hotkey::Mode) {
+    let controller = CONTROLLER.with_borrow(|c| c.clone());
+    if let Some(controller) = controller {
+        controller.show_mode(mode);
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if diagnostics(&args) {
@@ -102,7 +170,12 @@ fn main() {
     // Hotkey. A failure here must leave the app usable from the menu bar (FR-1).
     // RS_HOTKEY overrides the configuration file, for testing.
     let wanted = std::env::var("RS_HOTKEY").unwrap_or_else(|_| config::load(None).config.hotkey);
-    hotkey::init(&wanted, toggle_panel);
+    hotkey::init(&wanted, toggle_panel, show_mode);
+    for mode in hotkey::Mode::ALL {
+        if let Err(e) = hotkey::set_mode(mode, &controller.mode_hotkey(mode)) {
+            eprintln!("[rs] {e}");
+        }
+    }
 
     // Menu bar item: Open, Settings, Quit. It can be hidden from Settings.
     settings::install(&controller, mtm);

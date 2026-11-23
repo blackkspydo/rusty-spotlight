@@ -5,7 +5,7 @@
 //! A shortcut is one or more of Command, Option, Control, Shift, plus Space,
 //! a letter or a digit: `cmd+space`, `option+space`, `ctrl+shift+k`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
@@ -108,25 +108,70 @@ pub fn from_event(flags: NSEventModifierFlags, keycode: u16) -> Result<Shortcut,
     build(mods, key.0).ok_or_else(|| "Hold Command, Option or Control as well.".into())
 }
 
+/// A plugin the panel can be opened straight into, with its own shortcut.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    Clipboard,
+    Files,
+    Brew,
+}
+
+impl Mode {
+    pub const ALL: [Mode; 3] = [Mode::Clipboard, Mode::Files, Mode::Brew];
+
+    /// The plugin's id, as in `[plugins.<id>]`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Mode::Clipboard => "clipboard",
+            Mode::Files => "files",
+            Mode::Brew => "brew",
+        }
+    }
+
+    /// What the shortcut opens, for messages.
+    pub fn opens(self) -> &'static str {
+        match self {
+            Mode::Clipboard => "clipboard history",
+            Mode::Files => "file search",
+            Mode::Brew => "Homebrew search",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Slot {
+    Launch,
+    Mode(Mode),
+}
+
 struct Registered {
     hotkey: HotKey,
     shortcut: Shortcut,
+    slot: Slot,
 }
 
 thread_local! {
     static MANAGER: RefCell<Option<GlobalHotKeyManager>> = const { RefCell::new(None) };
-    static CURRENT: RefCell<Option<Registered>> = const { RefCell::new(None) };
-    /// Why registration failed, when it did.
+    static REGISTERED: RefCell<Vec<Registered>> = const { RefCell::new(Vec::new()) };
+    /// Why registration of the launcher shortcut failed, when it did.
     static PROBLEM: RefCell<Option<String>> = const { RefCell::new(None) };
+    static ON_LAUNCH: Cell<Option<fn()>> = const { Cell::new(None) };
+    static ON_MODE: Cell<Option<fn(Mode)>> = const { Cell::new(None) };
+    static READY: Cell<bool> = const { Cell::new(false) };
+    /// Shortcuts lifted while Settings is recording a new one.
+    static PAUSED: RefCell<Vec<(Slot, Shortcut)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Register the shortcut from config.toml (or RS_HOTKEY) and route presses
 /// to `on_press`. A failure leaves the app usable from the menu bar.
-pub fn init(wanted: &str, on_press: fn()) {
+/// `on_mode` runs for a plugin's own shortcut, once one is set.
+pub fn init(wanted: &str, on_press: fn(), on_mode: fn(Mode)) {
     let shortcut = parse(wanted).unwrap_or_else(|| {
         eprintln!("[rs] hotkey {wanted:?} not understood; using option+space");
         parse("option+space").expect("valid")
     });
+    ON_LAUNCH.set(Some(on_press));
+    ON_MODE.set(Some(on_mode));
     match GlobalHotKeyManager::new() {
         Ok(manager) => MANAGER.set(Some(manager)),
         Err(e) => {
@@ -137,29 +182,45 @@ pub fn init(wanted: &str, on_press: fn()) {
     }
     // The Carbon handler runs on the main thread's event target.
     GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
-        let ours = CURRENT.with_borrow(|c| c.as_ref().is_some_and(|r| r.hotkey.id() == event.id));
-        if !ours || event.state != HotKeyState::Pressed {
+        if event.state != HotKeyState::Pressed {
             return;
         }
+        let slot = REGISTERED.with_borrow(|all| {
+            all.iter().find(|r| r.hotkey.id() == event.id).map(|r| r.slot)
+        });
+        let Some(slot) = slot else { return };
         if MainThreadMarker::new().is_none() {
             eprintln!("[rs] hotkey event arrived off the main thread; ignored");
             return;
         }
-        if crate::keytap::claim() {
-            return; // the key tap already acted on this press
+        match slot {
+            Slot::Launch => {
+                if crate::keytap::claim() {
+                    return; // the key tap already acted on this press
+                }
+                event_log(if crate::keytap::active() { "hotkey pressed (Carbon; the key tap missed it)" } else { "hotkey pressed" });
+                if let Some(open) = ON_LAUNCH.get() {
+                    open();
+                }
+            }
+            Slot::Mode(mode) => {
+                event_log(&format!("{} hotkey pressed", mode.id()));
+                if let Some(open) = ON_MODE.get() {
+                    open(mode);
+                }
+            }
         }
-        event_log(if crate::keytap::active() { "hotkey pressed (Carbon; the key tap missed it)" } else { "hotkey pressed" });
-        on_press();
     }));
-    match register(&shortcut) {
+    match register(Slot::Launch, &shortcut) {
         Ok(()) => eprintln!("[rs] Hotkey: {}", shortcut.name),
         Err(e) => eprintln!("[rs] {e}"),
     }
     crate::keytap::start(on_press);
     sync_tap();
+    READY.set(true);
 }
 
-fn register(shortcut: &Shortcut) -> Result<(), String> {
+fn register(slot: Slot, shortcut: &Shortcut) -> Result<(), String> {
     let hotkey = HotKey::new(Some(shortcut.mods), shortcut.code);
     let result = MANAGER.with_borrow(|m| match m {
         Some(m) => m.register(hotkey).map_err(|e| e.to_string()),
@@ -167,20 +228,30 @@ fn register(shortcut: &Shortcut) -> Result<(), String> {
     });
     match result {
         Ok(()) => {
-            CURRENT.set(Some(Registered { hotkey, shortcut: shortcut.clone() }));
-            PROBLEM.set(None);
+            unregister_slot(slot);
+            REGISTERED.with_borrow_mut(|all| {
+                all.push(Registered { hotkey, shortcut: shortcut.clone(), slot });
+            });
+            if slot == Slot::Launch {
+                PROBLEM.set(None);
+            }
             Ok(())
         }
         Err(e) => {
             let reason = format!("{} is unavailable: {e}", shortcut.name);
-            PROBLEM.set(Some(reason.clone()));
+            if slot == Slot::Launch {
+                PROBLEM.set(Some(reason.clone()));
+            }
             Err(reason)
         }
     }
 }
 
-fn unregister() {
-    if let Some(old) = CURRENT.take() {
+fn unregister_slot(slot: Slot) {
+    let old = REGISTERED.with_borrow_mut(|all| {
+        all.iter().position(|r| r.slot == slot).map(|i| all.remove(i))
+    });
+    if let Some(old) = old {
         MANAGER.with_borrow(|m| {
             if let Some(m) = m {
                 let _ = m.unregister(old.hotkey);
@@ -202,11 +273,11 @@ pub fn change(shortcut: &Shortcut) -> Result<(), String> {
     if previous.as_ref() == Some(shortcut) {
         return Ok(());
     }
-    unregister();
-    let result = register(shortcut);
+    unregister_slot(Slot::Launch);
+    let result = register(Slot::Launch, shortcut);
     if result.is_err() {
         if let Some(p) = &previous {
-            let _ = register(p);
+            let _ = register(Slot::Launch, p);
         }
     } else {
         event_log(&format!("shortcut is now {}", shortcut.name));
@@ -215,25 +286,65 @@ pub fn change(shortcut: &Shortcut) -> Result<(), String> {
     result
 }
 
-/// While Settings records a shortcut, the current one must not open the panel.
+/// Register a plugin's shortcut from its config text. Empty clears it.
+/// Before `init`, this does nothing.
+pub fn set_mode(mode: Mode, text: &str) -> Result<(), String> {
+    if !READY.get() {
+        return Ok(());
+    }
+    let slot = Slot::Mode(mode);
+    let text = text.trim();
+    if text.is_empty() {
+        unregister_slot(slot);
+        return Ok(());
+    }
+    let shortcut = parse(text).ok_or_else(|| format!("{} shortcut {text:?} was not understood", mode.id()))?;
+    // One shortcut cannot open two things.
+    let taken = REGISTERED.with_borrow(|all| all.iter().find(|r| r.slot != slot && r.shortcut == shortcut).map(|r| r.slot));
+    match taken {
+        Some(Slot::Launch) => return Err(format!("{} already opens the launcher", shortcut.name)),
+        Some(Slot::Mode(other)) => return Err(format!("{} already opens {}", shortcut.name, other.opens())),
+        None => {}
+    }
+    if REGISTERED.with_borrow(|all| all.iter().any(|r| r.slot == slot && r.shortcut == shortcut)) {
+        return Ok(());
+    }
+    // On failure (another app owns it) the previous shortcut goes back.
+    let previous = mode_current(mode);
+    unregister_slot(slot);
+    let result = register(slot, &shortcut);
+    if result.is_err() {
+        if let Some(previous) = &previous {
+            let _ = register(slot, previous);
+        }
+    }
+    result
+}
+
+/// While Settings records a shortcut, no shortcut may open the panel.
 pub fn pause(paused: bool) {
     if paused {
-        let keep = current();
-        unregister();
+        let keep = REGISTERED.with_borrow(|all| all.iter().map(|r| (r.slot, r.shortcut.clone())).collect::<Vec<_>>());
+        for (slot, _) in &keep {
+            unregister_slot(*slot);
+        }
         crate::keytap::watch(0, 0);
         PAUSED.set(keep);
-    } else if let Some(s) = PAUSED.take() {
-        let _ = register(&s);
+    } else {
+        for (slot, shortcut) in PAUSED.take() {
+            let _ = register(slot, &shortcut);
+        }
         sync_tap();
     }
 }
 
-thread_local! {
-    static PAUSED: RefCell<Option<Shortcut>> = const { RefCell::new(None) };
+pub fn current() -> Option<Shortcut> {
+    REGISTERED.with_borrow(|all| all.iter().find(|r| r.slot == Slot::Launch).map(|r| r.shortcut.clone()))
 }
 
-pub fn current() -> Option<Shortcut> {
-    CURRENT.with_borrow(|c| c.as_ref().map(|r| r.shortcut.clone()))
+/// The shortcut that opens the panel straight into `mode`, when one is registered.
+pub fn mode_current(mode: Mode) -> Option<Shortcut> {
+    REGISTERED.with_borrow(|all| all.iter().find(|r| r.slot == Slot::Mode(mode)).map(|r| r.shortcut.clone()))
 }
 
 /// Why the shortcut is not working, if it is not.
