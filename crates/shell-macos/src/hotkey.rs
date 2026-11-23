@@ -309,8 +309,16 @@ pub fn set_mode(mode: Mode, text: &str) -> Result<(), String> {
     if REGISTERED.with_borrow(|all| all.iter().any(|r| r.slot == slot && r.shortcut == shortcut)) {
         return Ok(());
     }
+    // On failure (another app owns it) the previous shortcut goes back.
+    let previous = mode_current(mode);
     unregister_slot(slot);
-    register(slot, &shortcut)
+    let result = register(slot, &shortcut);
+    if result.is_err() {
+        if let Some(previous) = &previous {
+            let _ = register(slot, previous);
+        }
+    }
+    result
 }
 
 /// While Settings records a shortcut, no shortcut may open the panel.

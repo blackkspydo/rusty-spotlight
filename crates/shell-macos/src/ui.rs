@@ -157,6 +157,7 @@ define_class!(
             if NSEvent::pressedMouseButtons() != 0 {
                 event_log("hidden: clicked elsewhere");
                 self.orderOut(None);
+                crate::panel_hidden();
                 return;
             }
             // No click. Either the user switched apps from the keyboard, or an
@@ -189,6 +190,7 @@ define_class!(
             }
             event_log("hidden: another app took the keyboard");
             self.orderOut(None);
+            crate::panel_hidden();
         }
     }
 );
@@ -515,7 +517,10 @@ define_class!(
 
         #[unsafe(method(clipTick:))]
         fn clip_tick(&self, _timer: Option<&AnyObject>) {
-            if clipboard::poll() && self.ivars().mode.get() == Some(Mode::Clipboard) && self.ivars().panel.isVisible() {
+            let s = self.ivars();
+            // Not under an open action list: its rows would be replaced and
+            // Return would land on a history item instead.
+            if clipboard::poll() && s.mode.get() == Some(Mode::Clipboard) && s.panel.isVisible() && s.actions.borrow().is_none() {
                 self.present_inner(false);
             }
         }
@@ -978,7 +983,8 @@ impl Controller {
             *s.items.borrow_mut() = fresh;
         }
         // Anything typed in the meantime was ranked without these; rank again.
-        if !s.query.borrow().is_empty() {
+        // A brew shortcut's list waited for the panel to be on screen.
+        if !s.query.borrow().is_empty() || s.mode.get() == Some(Mode::Brew) {
             self.present();
         }
         if debug() {
@@ -1116,6 +1122,8 @@ impl Controller {
         let s = self.ivars();
         // The catalogue is only held while a brew search is open.
         s.brew_data.borrow_mut().take();
+        // File results are for this showing only: files appear, move and go.
+        s.file_cache.borrow_mut().clear();
         s.mode.set(None);
         let panel = s.panel.clone();
         if panel.isVisible() {
@@ -1125,6 +1133,11 @@ impl Controller {
         }
         if let Some(tint) = &self.ivars().tint {
             tint.stop();
+        }
+        // Icons of files and clipboard items pile up; apps alone never reach this.
+        let mut icons = self.ivars().icons.borrow_mut();
+        if icons.len() > 400 {
+            icons.clear();
         }
     }
 
@@ -1299,6 +1312,13 @@ impl Controller {
             self.cancel_files();
             s.file_cache.borrow_mut().clear();
         }
+        if !s.plugins.borrow().on("brew") {
+            // The catalogue and its fetch go; an install already running is
+            // left to finish, since half an install is worse.
+            s.brew_data.borrow_mut().take();
+            s.brew_done.borrow_mut().take();
+            brew::cancel_fetch();
+        }
         if clips_on {
             let config = s.config.borrow();
             clipboard::start(config.clipboard_keep_days(), config.clipboard_ignored_apps());
@@ -1317,6 +1337,7 @@ impl Controller {
                 eprintln!("[rs] plugin clipboard: off");
             }
             clipboard::stop();
+            s.thumbs.borrow_mut().clear();
         }
         // A mode whose plugin was just switched off falls back to plain search.
         if s.mode.get().is_some_and(|mode| !s.plugins.borrow().on(mode.id())) {
@@ -1518,6 +1539,11 @@ impl Controller {
         } else if let Some((_, title, detail)) = s.brew_done.borrow().as_ref() {
             rows.push(Row { id: "brew:done".into(), title: title.clone(), subtitle: Some(detail.clone()).filter(|d| !d.is_empty()), kind: Kind::Hint });
         }
+        // Reading the catalogue takes about 10 ms: never before the panel is
+        // on screen. `after_show` presents again once it is.
+        if s.brew_data.borrow().is_none() && !s.panel.isVisible() {
+            return rows;
+        }
         if s.brew_data.borrow().is_none() {
             *s.brew_data.borrow_mut() = brew::load();
         }
@@ -1531,14 +1557,14 @@ impl Controller {
             let (title, detail) = if fetching {
                 ("Fetching the Homebrew catalogue…", "Once a week; it takes a few seconds")
             } else {
-                ("The Homebrew catalogue could not be fetched", "Check the connection and type again")
+                ("The Homebrew catalogue could not be fetched", "Check the connection; it is tried again after a minute")
             };
             rows.push(Row { id: "brew:wait".into(), title: title.into(), subtitle: Some(detail.into()), kind: Kind::Hint });
             return rows;
         };
         let room = MAX_ROWS - rows.len();
         let found = if term.is_empty() {
-            launcher_core::brew::popular(&data.packages, room)
+            data.popular.iter().copied().take(room).collect()
         } else {
             launcher_core::brew::search(term, &data.packages, room)
         };

@@ -84,7 +84,30 @@ impl History {
         let mut history = Self { dir, entries };
         history.sort();
         history.evict();
+        history.sweep();
         history
+    }
+
+    /// Delete files in `items/` that no entry refers to: what an image left
+    /// behind when recording stopped while it was being resized. Files newer
+    /// than a minute may belong to an image still on its way.
+    fn sweep(&self) {
+        let Ok(files) = std::fs::read_dir(self.dir.join("items")) else { return };
+        let known: std::collections::HashSet<&str> =
+            self.entries.iter().filter_map(|e| e.blob.as_deref()).filter_map(|name| name.split('.').next()).collect();
+        for file in files.flatten() {
+            let name = file.file_name().to_string_lossy().into_owned();
+            let stem = name.split('.').next().unwrap_or("");
+            let old = file
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age.as_secs() > 60);
+            if old && !known.contains(stem) {
+                let _ = std::fs::remove_file(file.path());
+            }
+        }
     }
 
     fn search(&self, filter: &str) -> Vec<Entry> {
@@ -109,9 +132,11 @@ impl History {
             }
         } else {
             self.entries.push(entry);
-            self.evict();
         }
+        // Sorted first: eviction takes from the end, which must be the oldest
+        // and not the item that was just added.
         self.sort();
+        self.evict();
         let _ = self.save();
     }
 
@@ -186,8 +211,10 @@ impl History {
         let tmp = self.dir.join("index.json.tmp");
         let data = serde_json::to_vec_pretty(&self.entries).unwrap_or_else(|_| b"[]".to_vec());
         let mut file = std::fs::File::create(&tmp)?;
+        // Renamed into place, so a crash leaves the old index or the new one.
+        // No forced flush to the disk: that takes tens of milliseconds on the
+        // main thread, for a list that a lost second of would not hurt.
         file.write_all(&data)?;
-        file.sync_all()?;
         std::fs::rename(tmp, path)
     }
 
@@ -263,7 +290,16 @@ pub fn start(keep_days: u32, ignored_apps: Vec<String>) {
 pub fn stop() {
     ACTIVE.set(false);
     HISTORY.set(None);
-    PENDING.with_borrow_mut(Vec::clear);
+    // An image that finished but was not yet collected is deleted here; one
+    // still being resized deletes itself when it finds nobody listening.
+    let waiting = PENDING.take();
+    if let Some(dir) = root() {
+        for rx in &waiting {
+            if let Ok(Some(entry)) = rx.try_recv() {
+                delete_blob(&dir, &entry);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -758,5 +794,11 @@ mod tests {
         }
         assert!(history.entries.len() <= MAX_ENTRIES);
         assert!(history.entries.iter().any(|e| e.pinned && e.preview == "keep"));
+        // The newest copy is kept and the oldest unpinned one is what went.
+        let newest = format!("n{}", MAX_ENTRIES - 1);
+        assert!(history.entries.iter().any(|e| e.preview == newest), "the copy just made must survive");
+        assert!(!history.entries.iter().any(|e| e.preview == "n0"));
+        history.insert(entry(ClipKind::Text, "one more", MAX_ENTRIES as f64 + 10.0, false));
+        assert!(history.entries.iter().any(|e| e.preview == "one more"));
     }
 }

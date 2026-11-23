@@ -134,6 +134,15 @@ fn toggle_panel() {
     }
 }
 
+/// The panel hid itself (a click elsewhere, another app taking the keyboard):
+/// let go of what is only held while it is open.
+pub(crate) fn panel_hidden() {
+    let controller = CONTROLLER.with_borrow(|c| c.clone());
+    if let Some(controller) = controller {
+        controller.dismiss();
+    }
+}
+
 fn show_mode(mode: hotkey::Mode) {
     let controller = CONTROLLER.with_borrow(|c| c.clone());
     if let Some(controller) = controller {

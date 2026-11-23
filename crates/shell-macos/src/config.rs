@@ -295,7 +295,8 @@ fn edit_file(change: impl FnOnce(&str) -> String) -> std::io::Result<()> {
 /// The lines of `[table]`: from its header to the next header or the end.
 fn table_span(lines: &[String], table: &str) -> Option<(usize, usize)> {
     let header = format!("[{table}]");
-    let start = lines.iter().position(|l| l.trim() == header)?;
+    // A header may carry a comment: `[plugins.files] # local`.
+    let start = lines.iter().position(|l| l.split('#').next().unwrap_or("").trim() == header)?;
     let end = lines[start + 1..].iter().position(|l| l.trim_start().starts_with('[')).map_or(lines.len(), |i| start + 1 + i);
     Some((start, end))
 }
@@ -485,6 +486,10 @@ mod tests {
         let on = with_table_value(&off, "plugins.currency", "enabled", "true");
         assert!(toml::from_str::<Config>(&on).unwrap().plugin_on("currency", false));
         assert_eq!(on.matches("[plugins.currency]").count(), 2, "the template's commented example, and the real table");
+        // A header with a comment after it is still that table.
+        let noted = "[plugins.files] # local settings\nenabled = false\n";
+        let out = with_table_value(noted, "plugins.files", "enabled", "true");
+        assert_eq!(out, "[plugins.files] # local settings\nenabled = true\n");
         // A second plugin gets its own table and does not disturb the first.
         let two = with_table_value(&off, "plugins.files", "enabled", "true");
         let c: Config = toml::from_str(&two).unwrap();

@@ -97,7 +97,7 @@ fn word_relevance(word: &str, p: &Folded) -> u32 {
         68
     } else if p.token.contains(word) || p.name.contains(word) {
         45
-    } else if p.desc.split(|c: char| !c.is_alphanumeric()).any(|part| part.starts_with(word)) {
+    } else if p.desc.contains(word) && p.desc.split(|c: char| !c.is_alphanumeric()).any(|part| part.starts_with(word)) {
         25
     } else {
         0

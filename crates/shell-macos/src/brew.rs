@@ -9,14 +9,14 @@
 //!
 //! Nothing here runs unless the brew plugin is on and a `brew` search is typed.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use launcher_core::brew::{Package, parse_count, parse_index};
 use serde::Deserialize;
@@ -154,7 +154,15 @@ pub fn build_index() -> Result<usize, String> {
 thread_local! {
     /// The `--brew-index` child, while one runs.
     static BUILDING: RefCell<Option<Child>> = const { RefCell::new(None) };
+    /// When the index was last found fresh, or a fetch last failed: until a
+    /// little later, nothing is checked and nothing is fetched again.
+    static SETTLED_UNTIL: Cell<Option<Instant>> = const { Cell::new(None) };
 }
+
+/// A fetch that failed is not tried again for this long.
+const RETRY_AFTER: Duration = Duration::from_secs(60);
+/// A fresh index is not looked at again for this long.
+const RECHECK_AFTER: Duration = Duration::from_secs(600);
 
 fn index_is_fresh() -> bool {
     index_path()
@@ -167,14 +175,20 @@ fn index_is_fresh() -> bool {
 /// Whether the index is being built right now. Reaps the child when it ends.
 pub fn building() -> bool {
     BUILDING.with_borrow_mut(|slot| {
-        let done = match slot {
-            Some(child) => !matches!(child.try_wait(), Ok(None)),
+        let ended = match slot {
+            Some(child) => match child.try_wait() {
+                Ok(None) => return true,
+                Ok(Some(status)) => status.success(),
+                Err(_) => false,
+            },
             None => return false,
         };
-        if done {
-            *slot = None;
+        *slot = None;
+        if !ended {
+            eprintln!("[rs] brew: the catalogue fetch failed");
+            SETTLED_UNTIL.set(Some(Instant::now() + RETRY_AFTER));
         }
-        !done
+        false
     })
 }
 
@@ -184,7 +198,12 @@ pub fn refresh_if_stale() -> bool {
     if building() {
         return true;
     }
+    // Called for every presentation of a brew search: keep it to a compare.
+    if SETTLED_UNTIL.get().is_some_and(|until| Instant::now() < until) {
+        return false;
+    }
     if index_is_fresh() {
+        SETTLED_UNTIL.set(Some(Instant::now() + RECHECK_AFTER));
         return false;
     }
     let Ok(me) = std::env::current_exe() else { return false };
@@ -201,9 +220,19 @@ pub fn refresh_if_stale() -> bool {
     }
 }
 
+/// Stop a fetch in progress (the plugin was switched off).
+pub fn cancel_fetch() {
+    if let Some(mut child) = BUILDING.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 /// The packages, and which of them are installed on this Mac.
 pub struct Catalogue {
     pub packages: Vec<Package>,
+    /// The most installed, for an empty search; worked out once.
+    pub popular: Vec<usize>,
     installed: HashSet<(bool, String)>,
 }
 
@@ -222,7 +251,11 @@ impl Catalogue {
 pub fn load() -> Option<Catalogue> {
     let text = std::fs::read_to_string(index_path()?).ok()?;
     let packages = parse_index(&text);
-    (!packages.is_empty()).then(|| Catalogue { packages, installed: installed() })
+    if packages.is_empty() {
+        return None;
+    }
+    let popular = launcher_core::brew::popular(&packages, 16);
+    Some(Catalogue { packages, popular, installed: installed() })
 }
 
 /// What is installed: the folder names under Homebrew's Cellar and Caskroom.
