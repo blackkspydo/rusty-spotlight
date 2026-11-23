@@ -62,6 +62,19 @@ Open Settings from the menu bar icon, by typing `settings` in the launcher, or b
 - hide the menu bar icon;
 - turn start-at-login off.
 
+## Plugins
+
+Every feature is a plugin you can switch off in Settings › Plugins: Apps, Ask, Websites, Calculator, Currency, Units and World time. A plugin that is off does no work at all. With Currency off, for example, no exchange rate is ever fetched or read from disk, and `100 usd` shows nothing.
+
+The same switch in the configuration file:
+
+```toml
+[plugins.currency]
+enabled = false
+```
+
+`rusty-spotlight --plugins` lists which are on; `--plugins "12*7"` also shows the row a query leads to.
+
 ## Ask (optional)
 
 `?` questions go to an assistant command-line tool that is already installed and signed in on your Mac. Nothing is set up by Rusty Spotlight itself, and it holds no API keys.
