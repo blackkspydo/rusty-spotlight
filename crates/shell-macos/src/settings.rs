@@ -1049,6 +1049,7 @@ fn plugin_symbol(id: &str) -> &'static str {
         "files" => "folder.fill",
         "clipboard" => "doc.on.clipboard.fill",
         "brew" => "shippingbox.fill",
+        "settings" => "gearshape.fill",
         _ => "puzzlepiece.extension.fill",
     }
 }

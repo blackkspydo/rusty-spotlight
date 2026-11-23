@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use launcher_core::rank::completion;
 use launcher_core::text::fold;
-use launcher_core::{Item, Ranker, Usage};
+use launcher_core::{Item, Ranker, Tier, Usage};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Sel};
 use objc2::AnyThread;
@@ -34,7 +34,7 @@ use objc2_foundation::{
 };
 
 use crate::hotkey::Mode;
-use crate::{apps, ask, brew, clipboard, config, files, plugins, store};
+use crate::{apps, ask, brew, clipboard, config, files, plugins, store, syssettings};
 
 // Sizes in points, measured from Spotlight (docs/REQUIREMENTS.md, section 5.5).
 const PANEL_W: f64 = 640.0;
@@ -287,6 +287,8 @@ enum Kind {
     /// A Homebrew formula or cask. Return installs it, or opens its page
     /// when it is installed already.
     Brew { token: String, cask: bool, installed: bool, homepage: String },
+    /// A System Settings pane or section. Return opens it.
+    Setting { url: String, icon: String },
     /// A line of explanation. Return does nothing.
     Hint,
     /// One of the selected row's actions, listed by Command-K (FR-40).
@@ -328,7 +330,7 @@ impl Row {
             Kind::Value { .. } | Kind::Answer { .. } | Kind::Clip { .. } => "Copy",
             Kind::Ask { pending: true, .. } => "",
             Kind::Ask { .. } => "Ask",
-            Kind::Notice { .. } | Kind::File { .. } => "Open",
+            Kind::Notice { .. } | Kind::File { .. } | Kind::Setting { .. } => "Open",
             Kind::Brew { installed: false, .. } => "Install",
             Kind::Brew { ref homepage, .. } => if homepage.is_empty() { "" } else { "Open Page" },
             Kind::Hint => "",
@@ -416,6 +418,9 @@ pub struct State {
     brew_job: RefCell<Option<brew::Job>>,
     brew_done: RefCell<Option<(bool, String, String)>>,
     brew_timer: RefCell<Option<Retained<NSTimer>>>,
+    /// System Settings panes and sections, once read; and the read in progress.
+    sys_settings: RefCell<Option<Vec<launcher_core::settings::Setting>>>,
+    sys_settings_rx: RefCell<Option<std::sync::mpsc::Receiver<Vec<launcher_core::settings::Setting>>>>,
     thumbs: RefCell<HashMap<String, Retained<NSImage>>>,
     /// Height animation in flight: (from, to, start time), stepped by `spring_timer`.
     spring: Cell<Option<(f64, f64, std::time::Instant)>>,
@@ -870,6 +875,8 @@ impl Controller {
             brew_job: RefCell::new(None),
             brew_done: RefCell::new(None),
             brew_timer: RefCell::new(None),
+            sys_settings: RefCell::new(None),
+            sys_settings_rx: RefCell::new(None),
             thumbs: RefCell::new(HashMap::new()),
             spring: Cell::new(None),
             spring_timer: RefCell::new(None),
@@ -1312,6 +1319,14 @@ impl Controller {
             self.cancel_files();
             s.file_cache.borrow_mut().clear();
         }
+        if s.plugins.borrow().on("settings") {
+            if s.sys_settings.borrow().is_none() && s.sys_settings_rx.borrow().is_none() {
+                *s.sys_settings_rx.borrow_mut() = Some(syssettings::build_in_background());
+            }
+        } else {
+            s.sys_settings.borrow_mut().take();
+            s.sys_settings_rx.borrow_mut().take();
+        }
         if !s.plugins.borrow().on("brew") {
             // The catalogue and its fetch go; an install already running is
             // left to finish, since half an install is worse.
@@ -1466,18 +1481,26 @@ impl Controller {
             let usage = s.usage.borrow();
             let running = s.running.borrow();
             let ranked = s.ranker.borrow_mut().rank(query, &items, &usage, now(), MAX_ROWS);
-            ranked
-                .iter()
-                .map(|r| {
-                    let item = &items[r.index];
-                    Row {
-                        id: item.id.clone(),
-                        title: item.title.clone(),
-                        subtitle: None,
-                        kind: Kind::App { running: running.contains(&item.id) },
-                    }
-                })
-                .collect()
+            let apps = ranked.iter().map(|r| {
+                let item = &items[r.index];
+                // Where an app stands among System Settings results.
+                let place = match r.tier {
+                    Tier::Alias | Tier::Exact => 0,
+                    Tier::Prefix => 2,
+                    Tier::Fuzzy => 4,
+                };
+                let row = Row {
+                    id: item.id.clone(),
+                    title: item.title.clone(),
+                    subtitle: None,
+                    kind: Kind::App { running: running.contains(&item.id) },
+                };
+                (place, row)
+            });
+            let mut placed: Vec<(u8, Row)> = apps.chain(self.setting_rows(query)).collect();
+            // Stable: apps keep their order, settings theirs.
+            placed.sort_by_key(|(place, _)| *place);
+            placed.into_iter().map(|(_, row)| row).collect()
         };
         // The launcher's own entry (Settings) never outranks a real app.
         if let Some(own) = own_bundle() {
@@ -1668,6 +1691,36 @@ impl Controller {
         }
     }
 
+    /// System Settings matches, each with where it stands among apps: a pane
+    /// named exactly comes after apps named exactly and before the rest.
+    fn setting_rows(&self, query: &str) -> Vec<(u8, Row)> {
+        use launcher_core::settings::{Strength, search};
+        let s = self.ivars();
+        if query.trim().is_empty() || !s.plugins.borrow().on("settings") {
+            return Vec::new();
+        }
+        let arrived = s.sys_settings_rx.borrow().as_ref().and_then(|rx| rx.try_recv().ok());
+        if let Some(list) = arrived {
+            *s.sys_settings.borrow_mut() = Some(list);
+            s.sys_settings_rx.borrow_mut().take();
+        }
+        let list = s.sys_settings.borrow();
+        let Some(list) = list.as_ref() else { return Vec::new() };
+        search(query, list, 4)
+            .into_iter()
+            .map(|(i, strength)| {
+                let setting = &list[i];
+                let place = match strength {
+                    Strength::Exact => 1,
+                    Strength::Prefix | Strength::Word => 3,
+                    Strength::Keyword => 5,
+                };
+                let subtitle = if setting.is_pane() { "System Settings".to_string() } else { format!("System Settings › {}", setting.pane) };
+                (place, Row { id: setting.url.clone(), title: setting.title.clone(), subtitle: Some(subtitle), kind: Kind::Setting { url: setting.url.clone(), icon: setting.icon.clone() } })
+            })
+            .collect()
+    }
+
     fn clipboard_rows(&self, query: &str) -> Vec<Row> {
         let filter = if self.ivars().mode.get() == Some(Mode::Clipboard) {
             query.trim().to_string()
@@ -1843,6 +1896,7 @@ impl Controller {
             Kind::Notice { path } => format!("Open {}", path.rsplit('/').next().unwrap_or(path)),
             Kind::Clip { .. } => "Copy".to_string(),
             Kind::File { .. } => format!("Open {}", row.title),
+            Kind::Setting { .. } => format!("Open {}", row.title),
             Kind::Brew { installed: false, .. } => format!("Install {}", row.title),
             Kind::Brew { .. } => "Open Home Page".to_string(),
             Kind::Hint | Kind::Action { .. } => return Vec::new(),
@@ -1894,6 +1948,7 @@ impl Controller {
                 let line = brew::command_line(verb, token, *cask);
                 add(format!("Copy “{line}”"), Act::Copy(line), "doc.on.doc");
             }
+            Kind::Setting { url, .. } => add("Copy Link".into(), Act::Copy(url.clone()), "link"),
             Kind::File { path, .. } => {
                 add("Show in Finder".into(), Act::Reveal(path.clone()), "folder");
                 add("Copy Path".into(), Act::Copy(path.clone()), "doc.on.doc");
@@ -2003,6 +2058,7 @@ impl Controller {
                 Kind::Ask { pending: false, .. } => format!(" — {}", row.title),
                 Kind::Ask { .. } | Kind::Answer { .. } | Kind::Notice { .. } | Kind::Action { .. } | Kind::Hint => String::new(),
                 Kind::Clip { .. } | Kind::File { .. } => format!(" — {}", row.action()),
+                Kind::Setting { .. } => format!(" — {}", row.action()),
                 Kind::Brew { .. } if row.action().is_empty() => String::new(),
                 Kind::Brew { .. } => format!(" — {}", row.action()),
                 Kind::App { .. } => match completion(&query, &row.title) {
@@ -2071,6 +2127,7 @@ impl Controller {
                 Kind::Clip { .. } => Subject::Clip,
                 Kind::File { .. } => Subject::File,
                 Kind::Brew { .. } => Subject::Brew,
+                Kind::Setting { .. } => Subject::Setting,
                 Kind::Hint => Subject::Nothing,
             },
         };
@@ -2176,6 +2233,16 @@ impl Controller {
                 NSWorkspace::sharedWorkspace().openURL(&NSURL::fileURLWithPath(&ns(path)));
                 return;
             }
+            Kind::Setting { url, .. } => {
+                // Only System Settings' own links are opened from here.
+                if url.starts_with("x-apple.systempreferences:") {
+                    self.dismiss();
+                    if let Some(url) = NSURL::URLWithString(&ns(url)) {
+                        NSWorkspace::sharedWorkspace().openURL(&url);
+                    }
+                }
+                return;
+            }
             Kind::Brew { token, cask, installed: false, .. } => {
                 // Stays open: the first row follows the install.
                 self.start_brew(brew::Verb::Install, token, &row.title, *cask);
@@ -2211,6 +2278,21 @@ impl Controller {
         icon
     }
 
+    /// A System Settings pane's own icon, or System Settings' when it has none.
+    fn pane_icon(&self, type_id: &str) -> Retained<NSImage> {
+        if type_id.is_empty() {
+            return self.icon("/System/Applications/System Settings.app");
+        }
+        let key = format!("type:{type_id}");
+        if let Some(icon) = self.ivars().icons.borrow().get(&key) {
+            return icon.clone();
+        }
+        #[allow(deprecated)]
+        let icon = NSWorkspace::sharedWorkspace().iconForFileType(&ns(type_id));
+        self.ivars().icons.borrow_mut().insert(key, icon.clone());
+        icon
+    }
+
     /// A clipboard image's thumbnail, decoded once. The full image stays on disk.
     fn thumb(&self, id: &str) -> Option<Retained<NSImage>> {
         if let Some(image) = self.ivars().thumbs.borrow().get(id) {
@@ -2234,6 +2316,7 @@ impl Controller {
         match &row.kind {
             Kind::App { .. } => picture(self.icon(&row.id)),
             Kind::File { path, .. } => picture(self.icon(path)),
+            Kind::Setting { icon, .. } => picture(self.pane_icon(icon)),
             Kind::Clip { icon_path: Some(path), .. } => picture(self.icon(path)),
             Kind::Clip { image: true, id, .. } => {
                 if let Some(image) = self.thumb(id) {

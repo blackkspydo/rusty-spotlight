@@ -132,6 +132,15 @@ static ALL: &[Entry] = &[
     },
     Entry {
         meta: Meta {
+            id: "settings",
+            name: "System Settings",
+            blurb: "Finds System Settings panes and the sections inside them (“night shift”, “text replacements”) and opens them directly. Reads the panes once at start.",
+            default_on: true,
+        },
+        make: None,
+    },
+    Entry {
+        meta: Meta {
             id: "files",
             name: "Files",
             blurb: "“file notes” and “folder notes” find names in the index macOS already keeps. Runs a search only while you type one.",
@@ -584,7 +593,7 @@ mod tests {
         assert!(r.on("currency") && rates::enabled());
         // The order is `ALL`'s, whatever order plugins were switched in.
         let order: Vec<&str> = r.active.iter().map(|(id, _)| *id).collect();
-        assert_eq!(order, ["ask", "websites", "calculator", "currency", "units", "time"]);
+        assert_eq!(order, ["ask", "websites", "calculator", "currency", "units", "time"]); // host-run ones are not in `active`
     }
 
     #[test]

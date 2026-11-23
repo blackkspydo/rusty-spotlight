@@ -21,6 +21,7 @@ mod rates;
 mod settings;
 mod spaces;
 mod store;
+mod syssettings;
 mod theme;
 mod ui;
 mod watch;
@@ -75,6 +76,20 @@ fn diagnostics(args: &[String]) -> bool {
             println!("{}\t{}\t{}\t{}{}", p.installs, if p.cask { "cask" } else { "formula" }, p.token, p.desc, if catalogue.installed(p) { "  [installed]" } else { "" });
         }
         eprintln!("{} packages searched in {ms:.2} ms", catalogue.packages.len());
+        return true;
+    }
+    if args.len() >= 3 && args[1] == "--settings" {
+        // rusty-spotlight --settings <query>   System Settings panes and sections for a query
+        let t = Instant::now();
+        let list = syssettings::build(&syssettings::languages());
+        let read_ms = t.elapsed().as_secs_f64() * 1000.0;
+        let t = Instant::now();
+        let found = launcher_core::settings::search(&args[2], &list, 8);
+        let us = t.elapsed().as_secs_f64() * 1e6;
+        for (i, strength) in found {
+            println!("{strength:?}\t{}\t{} \t{}", list[i].title, list[i].pane, list[i].url);
+        }
+        eprintln!("{} entries read in {read_ms:.0} ms; searched in {us:.0} µs", list.len());
         return true;
     }
     if args.len() >= 2 && args[1] == "--plugins" {

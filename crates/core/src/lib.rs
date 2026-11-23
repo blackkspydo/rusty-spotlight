@@ -4,6 +4,7 @@
 pub mod brew;
 pub mod calc;
 pub mod rank;
+pub mod settings;
 pub mod text;
 pub mod time;
 pub mod units;

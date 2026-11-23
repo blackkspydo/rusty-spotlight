@@ -163,7 +163,8 @@ grok = ["grok", "-p", "{question}", "--no-subagents"]
 
 # Each feature can be switched off, here or in Settings > Plugins. A feature
 # that is off does no work at all: no network, no background activity.
-# The features: apps, ask, websites, calculator, currency, units, time, and
+# The features: apps, ask, websites, calculator, currency, units, time,
+# settings (System Settings panes and sections), and
 # three that start off: files, clipboard and brew.
 # [plugins.currency]
 # enabled = false

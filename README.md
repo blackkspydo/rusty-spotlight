@@ -17,6 +17,7 @@ A fast Spotlight replacement for macOS, written in Rust. It looks and moves like
 - **Files and folders** (off until you switch it on): `file notes` lists files and folders by name; `folder notes` lists folders. Names come from the index macOS already keeps.
 - **Clipboard history** (off until you switch it on): `clip` shows recent copies, including images and files. Return puts the selected one back on the clipboard.
 - **Ask:** `? how do I untar a file` sends the question to an assistant command-line tool on your Mac (Claude Code, Codex or Grok) and shows the answer.
+- **System Settings:** `bluetooth`, `night shift`, `text replacements`, `tap to click`, `microphone` open that pane, or that section inside it, directly. Results sit among your apps, each with its pane's icon.
 - **Command-K:** shows the selected result's other actions: Show in Finder, Copy Path, Quit, Copy Link, Pin, Delete, ask another tool.
 
 Return copies the answer to a sum, conversion or question, and opens a file or folder. Images in the clipboard history are stored on disk, with a small thumbnail kept for the list.
@@ -85,6 +86,12 @@ Clipboard history, while on:
 - does not record what was already on the clipboard when you switched it on.
 
 Switching it off stops the checking at once. What was already saved stays on disk until you clear it with Command-K › Clear Unpinned, or delete that folder.
+
+### System Settings
+
+On by default. Every pane on your Mac, and every section a pane lists in its own search terms (about 650 on macOS 26), is searchable: `night` finds Displays › Night Shift options, `mic` finds the microphone permission in Privacy & Security, `hot corners` finds Desktop & Dock. Return opens System Settings at that place.
+
+The list is read from the panes installed on this Mac (their `.searchTerms` files under `/System/Library/ExtensionKit/Extensions`), in your language, once at start on a background thread (about 20 ms). Nothing is fetched. `rusty-spotlight --settings night` prints how settings rank for a query.
 
 ### Homebrew
 

@@ -76,6 +76,7 @@ pub enum Subject<'a> {
     Clip,
     File,
     Brew,
+    Setting,
     Nothing,
 }
 
@@ -90,6 +91,7 @@ fn kind_colour(subject: &Subject) -> Option<Rgb> {
         Subject::Clip => (0.95, 0.55, 0.20),
         Subject::File => (0.25, 0.62, 0.95),
         Subject::Brew => (0.96, 0.64, 0.16),
+        Subject::Setting => (0.55, 0.58, 0.66),
         Subject::App(..) | Subject::Nothing => return None,
     })
 }
