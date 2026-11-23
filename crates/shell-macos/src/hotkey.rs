@@ -108,10 +108,37 @@ pub fn from_event(flags: NSEventModifierFlags, keycode: u16) -> Result<Shortcut,
     build(mods, key.0).ok_or_else(|| "Hold Command, Option or Control as well.".into())
 }
 
+/// A plugin the panel can be opened straight into, with its own shortcut.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    Clipboard,
+    Files,
+}
+
+impl Mode {
+    pub const ALL: [Mode; 2] = [Mode::Clipboard, Mode::Files];
+
+    /// The plugin's id, as in `[plugins.<id>]`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Mode::Clipboard => "clipboard",
+            Mode::Files => "files",
+        }
+    }
+
+    /// What the shortcut opens, for messages.
+    pub fn opens(self) -> &'static str {
+        match self {
+            Mode::Clipboard => "clipboard history",
+            Mode::Files => "file search",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Slot {
     Launch,
-    Clipboard,
+    Mode(Mode),
 }
 
 struct Registered {
@@ -126,7 +153,7 @@ thread_local! {
     /// Why registration of the launcher shortcut failed, when it did.
     static PROBLEM: RefCell<Option<String>> = const { RefCell::new(None) };
     static ON_LAUNCH: Cell<Option<fn()>> = const { Cell::new(None) };
-    static ON_CLIPBOARD: Cell<Option<fn()>> = const { Cell::new(None) };
+    static ON_MODE: Cell<Option<fn(Mode)>> = const { Cell::new(None) };
     static READY: Cell<bool> = const { Cell::new(false) };
     /// Shortcuts lifted while Settings is recording a new one.
     static PAUSED: RefCell<Vec<(Slot, Shortcut)>> = const { RefCell::new(Vec::new()) };
@@ -134,14 +161,14 @@ thread_local! {
 
 /// Register the shortcut from config.toml (or RS_HOTKEY) and route presses
 /// to `on_press`. A failure leaves the app usable from the menu bar.
-/// `on_clipboard` runs for the separate clipboard shortcut, once one is set.
-pub fn init(wanted: &str, on_press: fn(), on_clipboard: fn()) {
+/// `on_mode` runs for a plugin's own shortcut, once one is set.
+pub fn init(wanted: &str, on_press: fn(), on_mode: fn(Mode)) {
     let shortcut = parse(wanted).unwrap_or_else(|| {
         eprintln!("[rs] hotkey {wanted:?} not understood; using option+space");
         parse("option+space").expect("valid")
     });
     ON_LAUNCH.set(Some(on_press));
-    ON_CLIPBOARD.set(Some(on_clipboard));
+    ON_MODE.set(Some(on_mode));
     match GlobalHotKeyManager::new() {
         Ok(manager) => MANAGER.set(Some(manager)),
         Err(e) => {
@@ -173,10 +200,10 @@ pub fn init(wanted: &str, on_press: fn(), on_clipboard: fn()) {
                     open();
                 }
             }
-            Slot::Clipboard => {
-                event_log("clipboard hotkey pressed");
-                if let Some(open) = ON_CLIPBOARD.get() {
-                    open();
+            Slot::Mode(mode) => {
+                event_log(&format!("{} hotkey pressed", mode.id()));
+                if let Some(open) = ON_MODE.get() {
+                    open(mode);
                 }
             }
         }
@@ -256,34 +283,40 @@ pub fn change(shortcut: &Shortcut) -> Result<(), String> {
     result
 }
 
-/// Register the clipboard shortcut from its config text. Empty clears it.
+/// Register a plugin's shortcut from its config text. Empty clears it.
 /// Before `init`, this does nothing.
-pub fn set_clipboard(text: &str) -> Result<(), String> {
+pub fn set_mode(mode: Mode, text: &str) -> Result<(), String> {
     if !READY.get() {
         return Ok(());
     }
+    let slot = Slot::Mode(mode);
     let text = text.trim();
     if text.is_empty() {
-        unregister_slot(Slot::Clipboard);
+        unregister_slot(slot);
         return Ok(());
     }
-    let shortcut = parse(text).ok_or_else(|| format!("clipboard shortcut {text:?} was not understood"))?;
-    if current().as_ref() == Some(&shortcut) {
-        return Err(format!("{} already opens the launcher", shortcut.name));
+    let shortcut = parse(text).ok_or_else(|| format!("{} shortcut {text:?} was not understood", mode.id()))?;
+    // One shortcut cannot open two things.
+    let taken = REGISTERED.with_borrow(|all| all.iter().find(|r| r.slot != slot && r.shortcut == shortcut).map(|r| r.slot));
+    match taken {
+        Some(Slot::Launch) => return Err(format!("{} already opens the launcher", shortcut.name)),
+        Some(Slot::Mode(other)) => return Err(format!("{} already opens {}", shortcut.name, other.opens())),
+        None => {}
     }
-    if REGISTERED.with_borrow(|all| all.iter().any(|r| r.slot == Slot::Clipboard && r.shortcut == shortcut)) {
+    if REGISTERED.with_borrow(|all| all.iter().any(|r| r.slot == slot && r.shortcut == shortcut)) {
         return Ok(());
     }
-    unregister_slot(Slot::Clipboard);
-    register(Slot::Clipboard, &shortcut)
+    unregister_slot(slot);
+    register(slot, &shortcut)
 }
 
-/// While Settings records a shortcut, neither shortcut may open the panel.
+/// While Settings records a shortcut, no shortcut may open the panel.
 pub fn pause(paused: bool) {
     if paused {
         let keep = REGISTERED.with_borrow(|all| all.iter().map(|r| (r.slot, r.shortcut.clone())).collect::<Vec<_>>());
-        unregister_slot(Slot::Launch);
-        unregister_slot(Slot::Clipboard);
+        for (slot, _) in &keep {
+            unregister_slot(*slot);
+        }
         crate::keytap::watch(0, 0);
         PAUSED.set(keep);
     } else {
@@ -298,9 +331,9 @@ pub fn current() -> Option<Shortcut> {
     REGISTERED.with_borrow(|all| all.iter().find(|r| r.slot == Slot::Launch).map(|r| r.shortcut.clone()))
 }
 
-/// The shortcut that opens clipboard history, when one is registered.
-pub fn clipboard_current() -> Option<Shortcut> {
-    REGISTERED.with_borrow(|all| all.iter().find(|r| r.slot == Slot::Clipboard).map(|r| r.shortcut.clone()))
+/// The shortcut that opens the panel straight into `mode`, when one is registered.
+pub fn mode_current(mode: Mode) -> Option<Shortcut> {
+    REGISTERED.with_borrow(|all| all.iter().find(|r| r.slot == Slot::Mode(mode)).map(|r| r.shortcut.clone()))
 }
 
 /// Why the shortcut is not working, if it is not.

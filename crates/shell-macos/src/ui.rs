@@ -33,6 +33,7 @@ use objc2_foundation::{
     NSString, NSTimeZone, NSURL,
 };
 
+use crate::hotkey::Mode;
 use crate::{apps, ask, clipboard, config, files, plugins, store};
 
 // Sizes in points, measured from Spotlight (docs/REQUIREMENTS.md, section 5.5).
@@ -390,7 +391,9 @@ pub struct State {
     ask: RefCell<Option<AskRun>>,
     ask_timer: RefCell<Option<Retained<NSTimer>>>,
     /// Clipboard history is what the field filters, instead of apps.
-    clip_mode: Cell<bool>,
+    /// Set when a plugin's own shortcut opened the panel: the field then
+    /// searches that plugin alone, with no keyword.
+    mode: Cell<Option<Mode>>,
     clip_timer: RefCell<Option<Retained<NSTimer>>>,
     file_want: RefCell<Option<FileWant>>,
     file_want_at: Cell<std::time::Instant>,
@@ -499,7 +502,7 @@ define_class!(
 
         #[unsafe(method(clipTick:))]
         fn clip_tick(&self, _timer: Option<&AnyObject>) {
-            if clipboard::poll() && self.ivars().clip_mode.get() && self.ivars().panel.isVisible() {
+            if clipboard::poll() && self.ivars().mode.get() == Some(Mode::Clipboard) && self.ivars().panel.isVisible() {
                 self.present_inner(false);
             }
         }
@@ -832,7 +835,7 @@ impl Controller {
             shown_height: Cell::new(0.0),
             ask: RefCell::new(None),
             ask_timer: RefCell::new(None),
-            clip_mode: Cell::new(false),
+            mode: Cell::new(None),
             clip_timer: RefCell::new(None),
             file_want: RefCell::new(None),
             file_want_at: Cell::new(std::time::Instant::now()),
@@ -872,25 +875,31 @@ impl Controller {
     }
 
     pub fn show(&self) {
-        self.open(false);
+        self.open(None);
     }
 
-    /// The clipboard shortcut: the field filters clipboard history.
-    pub fn show_clipboard(&self) {
+    /// A plugin's own shortcut: the field searches that plugin alone. Pressed
+    /// again it closes the panel; pressed over another mode it switches.
+    pub fn show_mode(&self, mode: Mode) {
         let s = self.ivars();
-        if !s.plugins.borrow().on("clipboard") {
+        if !s.plugins.borrow().on(mode.id()) {
             return;
         }
-        if s.panel.isVisible() && s.clip_mode.get() {
+        if s.panel.isVisible() && s.mode.get() == Some(mode) {
             self.dismiss();
             return;
         }
-        self.open(true);
+        self.open(Some(mode));
     }
 
-    fn open(&self, clips: bool) {
+    fn open(&self, mode: Option<Mode>) {
         let s = self.ivars();
-        s.clip_mode.set(clips);
+        s.mode.set(mode);
+        s.field.setPlaceholderString(Some(&ns(match mode {
+            None => "Search",
+            Some(Mode::Clipboard) => "Clipboard history",
+            Some(Mode::Files) => "Files and folders",
+        })));
         let t = std::time::Instant::now();
         if config::changed_since(s.config_modified.get()) {
             self.reload_config(false);
@@ -1078,7 +1087,7 @@ impl Controller {
         self.cancel_ask();
         self.cancel_files();
         let s = self.ivars();
-        s.clip_mode.set(false);
+        s.mode.set(None);
         let panel = s.panel.clone();
         if panel.isVisible() {
             event_log("hidden: dismissed");
@@ -1243,10 +1252,10 @@ impl Controller {
         self.sync_optional_plugins();
     }
 
-    /// The clipboard shortcut in force: none while the plugin is off.
-    pub fn clipboard_hotkey(&self) -> String {
+    /// The shortcut that opens straight into `mode`: none while its plugin is off.
+    pub fn mode_hotkey(&self, mode: Mode) -> String {
         let s = self.ivars();
-        if s.plugins.borrow().on("clipboard") { s.config.borrow().clipboard_hotkey() } else { String::new() }
+        if s.plugins.borrow().on(mode.id()) { s.config.borrow().plugin_hotkey(mode.id()) } else { String::new() }
     }
 
     /// Start or stop what the files and clipboard plugins keep running. Off
@@ -1279,10 +1288,15 @@ impl Controller {
                 eprintln!("[rs] plugin clipboard: off");
             }
             clipboard::stop();
-            s.clip_mode.set(false);
         }
-        if let Err(error) = crate::hotkey::set_clipboard(&self.clipboard_hotkey()) {
-            eprintln!("[rs] {error}");
+        // A mode whose plugin was just switched off falls back to plain search.
+        if s.mode.get().is_some_and(|mode| !s.plugins.borrow().on(mode.id())) {
+            s.mode.set(None);
+        }
+        for mode in Mode::ALL {
+            if let Err(error) = crate::hotkey::set_mode(mode, &self.mode_hotkey(mode)) {
+                eprintln!("[rs] {error}");
+            }
         }
     }
 
@@ -1342,11 +1356,15 @@ impl Controller {
             let plugins = s.plugins.borrow();
             (plugins.on("files"), plugins.on("clipboard"))
         };
-        let rows = if clips && (s.clip_mode.get() || clipboard::keyword_filter(&query).is_some()) {
+        let mode = s.mode.get();
+        let rows = if clips && (mode == Some(Mode::Clipboard) || (mode.is_none() && clipboard::keyword_filter(&query).is_some())) {
             self.cancel_files();
             self.clipboard_rows(&query)
         } else if search_files {
-            if let Some((term, folders_only)) = files::keyword(&query) {
+            if mode == Some(Mode::Files) {
+                // Opened by the files shortcut: everything typed is the name.
+                self.exclusive_files(query.trim(), false)
+            } else if let Some((term, folders_only)) = files::keyword(&query) {
                 self.exclusive_files(&term, folders_only)
             } else {
                 self.app_rows(&query)
@@ -1435,7 +1453,7 @@ impl Controller {
     }
 
     fn clipboard_rows(&self, query: &str) -> Vec<Row> {
-        let filter = if self.ivars().clip_mode.get() {
+        let filter = if self.ivars().mode.get() == Some(Mode::Clipboard) {
             query.trim().to_string()
         } else {
             clipboard::keyword_filter(query).unwrap_or_default()

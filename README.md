@@ -86,6 +86,18 @@ Clipboard history, while on:
 
 Switching it off stops the checking at once. What was already saved stays on disk until you clear it with Command-K › Clear Unpinned, or delete that folder.
 
+### A shortcut of its own
+
+Clipboard history and file search can each have their own shortcut, which opens the panel straight into that plugin: everything you type searches it, with no `clip` or `file` first. Record them in Settings › General, or set `hotkey` in the plugin's table:
+
+```toml
+[plugins.files]
+enabled = true
+hotkey = "opt+cmd+space"
+```
+
+Pressing the shortcut again closes the panel; pressing another plugin's shortcut switches to it. A shortcut is released while its plugin is off.
+
 `rusty-spotlight --plugins` lists which are on; `--plugins "12*7"` also shows the row a query leads to.
 
 ## Ask (optional)

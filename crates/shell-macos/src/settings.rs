@@ -27,6 +27,7 @@ use objc2_app_kit::{
 use objc2_foundation::{NSInteger, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL};
 
 use crate::config;
+use crate::hotkey::Mode;
 use crate::theme;
 use crate::ui::{Controller, event_log};
 
@@ -60,6 +61,8 @@ struct Controls {
     learning_note: Option<Retained<NSTextField>>,
     clipboard: Option<Retained<NSButton>>,
     clipboard_note: Option<Retained<NSTextField>>,
+    files_key: Option<Retained<NSButton>>,
+    files_note: Option<Retained<NSTextField>>,
     search_files: Option<Retained<NSButton>>,
 }
 
@@ -76,8 +79,8 @@ thread_local! {
     static LISTS: RefCell<Vec<Retained<PairList>>> = const { RefCell::new(Vec::new()) };
     /// The local key monitor while a shortcut is being recorded.
     static RECORDING: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
-    /// True while the shortcut being recorded opens clipboard history.
-    static RECORD_CLIP: Cell<bool> = const { Cell::new(false) };
+    /// The plugin whose shortcut is being recorded; `None` for the launcher's.
+    static RECORD_MODE: Cell<Option<Mode>> = const { Cell::new(None) };
     /// Set while controls are being filled in, so their actions do not save.
     static SYNCING: Cell<bool> = const { Cell::new(false) };
 }
@@ -177,13 +180,14 @@ fn shortcut_changed() {
             item.setHidden(problem.is_none());
         }
     });
-    let clipboard = crate::hotkey::clipboard_current().map(|s| s.name);
     CONTROLS.with_borrow(|c| {
         if let Some(button) = &c.shortcut {
             button.setTitle(&ns(&current.map(|s| s.name).unwrap_or_else(|| "None".into())));
         }
-        if let Some(button) = &c.clipboard {
-            button.setTitle(&ns(&clipboard.unwrap_or_else(|| "None".into())));
+        for mode in Mode::ALL {
+            if let Some(button) = mode_button(c, mode) {
+                button.setTitle(&ns(&crate::hotkey::mode_current(mode).map(|s| s.name).unwrap_or_else(|| "None".into())));
+            }
         }
     });
 }
@@ -268,12 +272,17 @@ define_class!(
 
         #[unsafe(method(recordShortcut:))]
         fn record_shortcut(&self, _sender: Option<&AnyObject>) {
-            start_recording(false);
+            start_recording(None);
         }
 
         #[unsafe(method(recordClipboard:))]
         fn record_clipboard(&self, _sender: Option<&AnyObject>) {
-            start_recording(true);
+            start_recording(Some(Mode::Clipboard));
+        }
+
+        #[unsafe(method(recordFiles:))]
+        fn record_files(&self, _sender: Option<&AnyObject>) {
+            start_recording(Some(Mode::Files));
         }
 
         #[unsafe(method(filesChanged:))]
@@ -401,21 +410,37 @@ fn home() -> PathBuf {
 
 // ---------------------------------------------------------------- shortcut recording
 
-fn start_recording(clip: bool) {
+fn mode_button(c: &Controls, mode: Mode) -> Option<&Retained<NSButton>> {
+    match mode {
+        Mode::Clipboard => c.clipboard.as_ref(),
+        Mode::Files => c.files_key.as_ref(),
+    }
+}
+
+fn mode_hint(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Clipboard => CLIP_HINT,
+        Mode::Files => FILES_HINT,
+    }
+}
+
+fn start_recording(mode: Option<Mode>) {
     if RECORDING.with_borrow(Option::is_some) {
         return;
     }
-    RECORD_CLIP.set(clip);
+    RECORD_MODE.set(mode);
     // Neither shortcut may open the panel while one is being replaced.
     crate::hotkey::pause(true);
     let hint = "Press the new shortcut, or Escape to keep the current one.";
-    if clip {
-        note_clip(hint, false);
-    } else {
-        note_shortcut(hint, false);
+    match mode {
+        Some(mode) => note_mode(mode, hint, false),
+        None => note_shortcut(hint, false),
     }
     CONTROLS.with_borrow(|c| {
-        let button = if clip { &c.clipboard } else { &c.shortcut };
+        let button = match mode {
+            Some(mode) => mode_button(c, mode),
+            None => c.shortcut.as_ref(),
+        };
         if let Some(button) = button {
             button.setTitle(&ns("Type shortcut…"));
         }
@@ -430,7 +455,10 @@ fn start_recording(clip: bool) {
         let flags = event.modifierFlags() & NSEventModifierFlags::DeviceIndependentFlagsMask;
         match crate::hotkey::from_event(flags, keycode) {
             Ok(shortcut) => stop_recording(Some(shortcut)),
-            Err(why) => note_shortcut(&why, true),
+            Err(why) => match RECORD_MODE.get() {
+                Some(mode) => note_mode(mode, &why, true),
+                None => note_shortcut(&why, true),
+            },
         }
         std::ptr::null_mut()
     });
@@ -442,20 +470,20 @@ fn start_recording(clip: bool) {
 fn stop_recording(shortcut: Option<crate::hotkey::Shortcut>) {
     let Some(monitor) = RECORDING.take() else { return };
     unsafe { NSEvent::removeMonitor(&monitor) };
-    let clip = RECORD_CLIP.replace(false);
+    let mode = RECORD_MODE.replace(None);
     crate::hotkey::pause(false);
-    if clip {
+    if let Some(mode) = mode {
         match shortcut {
-            None => note_clip(CLIP_HINT, false),
-            Some(s) => match crate::hotkey::set_clipboard(&s.text) {
+            None => note_mode(mode, mode_hint(mode), false),
+            Some(s) => match crate::hotkey::set_mode(mode, &s.text) {
                 Ok(()) => {
-                    let saved = config::set_table_value("plugins.clipboard", "hotkey", &config::quote(&s.text));
+                    let saved = config::set_table_value(&format!("plugins.{}", mode.id()), "hotkey", &config::quote(&s.text));
                     match saved {
-                        Ok(()) => note_clip(&format!("Saved. {} opens clipboard history.", s.name), false),
-                        Err(e) => note_clip(&format!("Working, but not saved: {e}"), true),
+                        Ok(()) => note_mode(mode, &format!("Saved. {} opens {}.", s.name, mode.opens()), false),
+                        Err(e) => note_mode(mode, &format!("Working, but not saved: {e}"), true),
                     }
                 }
-                Err(e) => note_clip(&format!("{e}. The previous shortcut is kept."), true),
+                Err(e) => note_mode(mode, &format!("{e}. The previous shortcut is kept."), true),
             },
         }
     } else {
@@ -480,9 +508,15 @@ const SHORTCUT_HINT: &str = "Click to record a new shortcut. For Command-Space, 
 
 const CLIP_HINT: &str = "Needs the Clipboard history plugin. Click to record a shortcut that opens it; none is set until you do. For Shift-Command-Space, untick Ask Siri about active window under Keyboard Shortcuts › Screenshots.";
 
-fn note_clip(text: &str, warning: bool) {
+const FILES_HINT: &str = "Needs the Files plugin. Click to record a shortcut that opens straight into file search, with no “file” to type first.";
+
+fn note_mode(mode: Mode, text: &str, warning: bool) {
     CONTROLS.with_borrow(|c| {
-        if let Some(note) = &c.clipboard_note {
+        let note = match mode {
+            Mode::Clipboard => &c.clipboard_note,
+            Mode::Files => &c.files_note,
+        };
+        if let Some(note) = note {
             note.setStringValue(&ns(text));
             let colour = if warning { NSColor::systemRedColor() } else { NSColor::secondaryLabelColor() };
             note.setTextColor(Some(&*colour));
@@ -630,10 +664,12 @@ fn sync_from(config: &config::Config) {
             b.setState(state(config.files_ambient()));
             b.setEnabled(crate::plugins::is_on(config, "files"));
         }
-        if let Some(b) = &c.clipboard {
-            b.setEnabled(crate::plugins::is_on(config, "clipboard"));
-            let name = crate::hotkey::clipboard_current().map(|s| s.name).unwrap_or_else(|| "None".into());
-            b.setTitle(&ns(&name));
+        for mode in Mode::ALL {
+            if let Some(b) = mode_button(c, mode) {
+                b.setEnabled(crate::plugins::is_on(config, mode.id()));
+                let name = crate::hotkey::mode_current(mode).map(|s| s.name).unwrap_or_else(|| "None".into());
+                b.setTitle(&ns(&name));
+            }
         }
         let login = login_enabled();
         if let Some(b) = &c.login {
@@ -826,7 +862,7 @@ fn popup(items: &[&str], action: Sel, mtm: MainThreadMarker) -> Retained<NSPopUp
 // ---------------------------------------------------------------- tabs
 
 fn general(mtm: MainThreadMarker) -> Retained<NSViewController> {
-    let mut f = Form::new(520.0, mtm);
+    let mut f = Form::new(590.0, mtm);
     let shortcut = button("Command-Space", sel!(recordShortcut:), mtm);
     shortcut.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
     f.row("Shortcut:", &shortcut, 190.0, 28.0);
@@ -853,8 +889,13 @@ fn general(mtm: MainThreadMarker) -> Retained<NSViewController> {
 
     let clipboard = button("None", sel!(recordClipboard:), mtm);
     clipboard.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
-    f.row("Clipboard:", &clipboard, 190.0, 28.0);
+    f.row("Clipboard shortcut:", &clipboard, 190.0, 28.0);
     let clipboard_note = f.note(CLIP_HINT);
+    f.gap(10.0);
+    let files_key = button("None", sel!(recordFiles:), mtm);
+    files_key.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium })));
+    f.row("Files shortcut:", &files_key, 190.0, 28.0);
+    let files_note = f.note(FILES_HINT);
     f.gap(10.0);
     let search_files = checkbox("List file names under apps as you type", sel!(filesChanged:), mtm);
     f.row("Files:", &search_files, 330.0, 20.0);
@@ -870,6 +911,8 @@ fn general(mtm: MainThreadMarker) -> Retained<NSViewController> {
         c.menu_icon = Some(menu_icon);
         c.clipboard = Some(clipboard);
         c.clipboard_note = Some(clipboard_note);
+        c.files_key = Some(files_key);
+        c.files_note = Some(files_note);
         c.search_files = Some(search_files);
     });
     f.controller("General")

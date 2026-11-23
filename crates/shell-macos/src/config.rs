@@ -53,9 +53,10 @@ impl Config {
         self.plugins.get(id)?.options.get(key)
     }
 
-    /// `[plugins.clipboard] hotkey`: opens clipboard history. Empty: none.
-    pub fn clipboard_hotkey(&self) -> String {
-        self.option("clipboard", "hotkey").and_then(|v| v.as_str()).unwrap_or("").to_string()
+    /// `[plugins.<id>] hotkey`: opens the panel straight into that plugin
+    /// (clipboard history, file search). Empty: none.
+    pub fn plugin_hotkey(&self, id: &str) -> String {
+        self.option(id, "hotkey").and_then(|v| v.as_str()).unwrap_or("").to_string()
     }
 
     /// `[plugins.clipboard] keep_days`: unpinned items older than this are
@@ -170,9 +171,11 @@ grok = ["grok", "-p", "{question}", "--no-subagents"]
 # File and folder names, from the index macOS already keeps. "file notes"
 # searches files and folders; "folder notes" searches folders. With
 # ambient = true, names are also listed under apps as you type.
+# hotkey opens the panel straight into file search, with no keyword to type.
 # [plugins.files]
 # enabled = true
 # ambient = false
+# hotkey = ""
 
 # Clipboard history: text, images and copied files, kept on this Mac. Type
 # "clip", or set a shortcut ("shift+cmd+space" is usual; first untick "Ask Siri
@@ -486,17 +489,18 @@ mod tests {
     #[test]
     fn plugin_options_are_read_from_the_plugin_table() {
         let c = Config::default();
-        assert_eq!((c.clipboard_hotkey().as_str(), c.clipboard_keep_days(), c.files_ambient()), ("", 30, false));
+        assert_eq!((c.plugin_hotkey("clipboard").as_str(), c.clipboard_keep_days(), c.files_ambient()), ("", 30, false));
         assert_eq!(c.clipboard_ignored_apps(), ["com.apple.Passwords", "com.apple.keychainaccess"]);
-        let c: Config = toml::from_str("[plugins.clipboard]\nenabled = true\nhotkey = \"shift+cmd+space\"\nkeep_days = 7\nignore_apps = [\"com.1password.1password\"]\n[plugins.files]\nambient = true\n").unwrap();
+        let c: Config = toml::from_str("[plugins.clipboard]\nenabled = true\nhotkey = \"shift+cmd+space\"\nkeep_days = 7\nignore_apps = [\"com.1password.1password\"]\n[plugins.files]\nambient = true\nhotkey = \"opt+cmd+space\"\n").unwrap();
+        assert_eq!((c.plugin_hotkey("files").as_str(), c.plugin_hotkey("units").as_str()), ("opt+cmd+space", ""));
         assert!(c.plugin_on("clipboard", false) && !c.plugin_on("files", false));
-        assert_eq!((c.clipboard_hotkey().as_str(), c.clipboard_keep_days(), c.files_ambient()), ("shift+cmd+space", 7, true));
+        assert_eq!((c.plugin_hotkey("clipboard").as_str(), c.clipboard_keep_days(), c.files_ambient()), ("shift+cmd+space", 7, true));
         assert_eq!(c.clipboard_ignored_apps(), ["com.1password.1password"]);
         // Saving one option leaves the others.
         let text = "[plugins.clipboard]\nenabled = true\nkeep_days = 7\n";
         let out = with_table_value(text, "plugins.clipboard", "hotkey", "\"ctrl+v\"");
         let c: Config = toml::from_str(&out).unwrap();
-        assert_eq!((c.clipboard_hotkey().as_str(), c.clipboard_keep_days()), ("ctrl+v", 7));
+        assert_eq!((c.plugin_hotkey("clipboard").as_str(), c.clipboard_keep_days()), ("ctrl+v", 7));
     }
 
     #[test]
