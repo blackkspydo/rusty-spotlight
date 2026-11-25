@@ -12,38 +12,36 @@
 <link rel="icon" href="AppIcon.png">
 <link rel="stylesheet" href="style.css">
 <!--
-  Adding to the changelog: put the newest day first in <main>, as a
-  <section class="day"> with its date in the margin, then one
-  <article class="entry"> per feature or fix. Kinds: New (class "kind new"),
-  Improved, Fixed. Plain words: what it does for someone using it, and what
-  to type to try it. Then update the "New" line at the top of index.html.
+  Adding to the changelog: put the newest day first in main, as a
+  section.day with its date, a title, and one article.entry per feature or
+  fix inside the "tile list". Kinds: New, Improved, Fixed. Plain words: what
+  it does for someone using it, and what to type to try it. Then update the
+  "New" line at the top of index.html.
 -->
 </head>
 <body>
+<div class="edge" aria-hidden="true"></div>
 <div class="wrap">
-  <header class="masthead">
-    <a class="wordmark" href="./"><img src="AppIcon.png" alt="">Rusty Spotlight</a>
-    <nav>
-      <a href="changelog.html" aria-current="page">Changelog</a>
-      <a class="gh" href="https://github.com/blackkspydo/rusty-spotlight">GitHub</a>
-      <a class="button" href="./#install">Install</a>
-    </nav>
+  <header class="toolbar glass">
+    <a class="name" href="./"><img src="AppIcon.png" alt="">Rusty Spotlight</a>
+    <a class="item" href="changelog.html" aria-current="page">Changelog</a>
+    <a class="item gh" href="https://github.com/blackkspydo/rusty-spotlight">GitHub</a>
+    <a class="button small" href="./#install">Install</a>
   </header>
 
   <div class="pagehead">
     <h1>Changelog</h1>
-    <p class="deck">What changed, newest first. To get it, run <code>git pull &amp;&amp; ./scripts/install.sh</code> in your copy.</p>
+    <p class="lead">What changed, newest first. To update, run <code>git pull &amp;&amp; ./scripts/install.sh</code> in your copy.</p>
   </div>
 
   <main>
     <section class="day" id="2026-11-23">
-      <p class="date label"><b>23 November 2026</b></p>
-      <div class="entries">
+      <p class="date">23 November 2026</p>
         <h2>Plugins, and four new things to search</h2>
-        <p class="deck">Every feature became a plugin you can switch off. System Settings, Homebrew, clipboard history and file search arrived.</p>
-
+        <p class="lead">Every feature became a plugin you can switch off. System Settings, Homebrew, clipboard history and file search arrived.</p>
+        <div class="tile list">
         <article class="entry">
-          <span class="kind new">New</span>
+          <span class="kind">New</span>
           <div>
             <h3>System Settings search <span class="state">On by default</span></h3>
             <p>Search the places inside System Settings, not only its name. <code>night shift</code>, <code>text replacements</code>, <code>tap to click</code>, <code>microphone</code> or <code>hot corners</code> lists that setting, and Return opens System Settings right there.</p>
@@ -52,7 +50,7 @@
         </article>
 
         <article class="entry">
-          <span class="kind new">New</span>
+          <span class="kind">New</span>
           <div>
             <h3>Homebrew <span class="state">Off by default</span></h3>
             <p><code>brew ripgrep</code> searches every formula and cask: best name match first, then by installs over the last 30 days. Return installs it and the first row follows the progress. Command-K upgrades, uninstalls, opens the home page or copies the command.</p>
@@ -61,7 +59,7 @@
         </article>
 
         <article class="entry">
-          <span class="kind new">New</span>
+          <span class="kind">New</span>
           <div>
             <h3>Clipboard history <span class="state">Off by default</span></h3>
             <p><code>clip</code> lists recent copies, including images and files, and Return puts one back on the clipboard. Pin the ones to keep. Anything a password manager marks as secret, or copied while Passwords or Keychain Access is in front, is never kept.</p>
@@ -70,7 +68,7 @@
         </article>
 
         <article class="entry">
-          <span class="kind new">New</span>
+          <span class="kind">New</span>
           <div>
             <h3>File search <span class="state">Off by default</span></h3>
             <p>File and folder names from Spotlight's own index, listed under apps once you've typed two letters, or on their own after <code>file</code>. Rusty Spotlight still keeps no index of its own.</p>
@@ -79,7 +77,7 @@
         </article>
 
         <article class="entry">
-          <span class="kind new">New</span>
+          <span class="kind">New</span>
           <div>
             <h3>Plugins you can switch off</h3>
             <p>Apps, Ask, Websites, Calculator, Currency, Units, World time and the new plugins can each be turned off in Settings › Plugins, or with <code>enabled = false</code> under <code>[plugins.&lt;name&gt;]</code> in the configuration file. Off means no work at all: with Currency off, no exchange rate is ever fetched.</p>
@@ -87,7 +85,7 @@
         </article>
 
         <article class="entry">
-          <span class="kind new">New</span>
+          <span class="kind">New</span>
           <div>
             <h3>A shortcut per plugin</h3>
             <p>Give clipboard history, file search or Homebrew a shortcut of its own and the panel opens straight into it: whatever you type searches that plugin. Press it again to close, or another plugin's shortcut to switch.</p>
@@ -115,17 +113,16 @@
             </ul>
           </div>
         </article>
-      </div>
-    </section>
+        </div>
+</section>
 
     <section class="day" id="2026-11-22">
-      <p class="date label"><b>22 November 2026</b>Version 0.0.1</p>
-      <div class="entries">
+      <p class="date">22 November 2026 · Version 0.0.1</p>
         <h2>First release</h2>
-        <p class="deck">Rusty Spotlight goes public.</p>
-
+        <p class="lead">Rusty Spotlight goes public.</p>
+        <div class="tile list">
         <article class="entry">
-          <span class="kind new">New</span>
+          <span class="kind">New</span>
           <div>
             <h3>One field for everything</h3>
             <ul>
@@ -140,7 +137,7 @@
         </article>
 
         <article class="entry">
-          <span class="kind new">New</span>
+          <span class="kind">New</span>
           <div>
             <h3>Glass that follows, and a Settings window</h3>
             <p>The Liquid Glass panel takes each app's colours from its icon, or Aurora, your accent colour, or none. Settings covers the shortcut, open at login, the menu bar icon, glass colour and motion. And an app icon.</p>
@@ -154,11 +151,11 @@
             <p>From the shortcut to the panel on screen in 22 ms typically (was 48 ms). The panel now opens on the Space you're on, including over full-screen apps, where it used to appear off screen.</p>
           </div>
         </article>
-      </div>
-    </section>
+        </div>
+</section>
   </main>
 
-  <footer class="colophon">
+  <footer class="foot footnote">
     <p>Every commit is on <a href="https://github.com/blackkspydo/rusty-spotlight/commits/main">GitHub</a>.</p>
     <nav><a href="./">Home</a><a href="https://github.com/blackkspydo/rusty-spotlight">GitHub</a></nav>
   </footer>

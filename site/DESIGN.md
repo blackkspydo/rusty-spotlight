@@ -1,114 +1,110 @@
 # The website's design language
 
-The rules behind `index.html`, `changelog.html` and `style.css`. Read this
-before adding a page or a section. It is not published.
+The site is built to Apple's Human Interface Guidelines (HIG), because the
+app is: Rusty Spotlight is drawn on Liquid Glass, so its page should feel
+like the same system. Read this before adding a page or a section. It is
+not published.
 
-## Why it looks like this
+Sources, read November 2026:
 
-The first site was a dark page with blurred colour blobs, a centred hero, a
-gradient pill button and a grid of nine glass cards. That is what every
-generated landing page looks like, and people said so.
+- HIG: [Materials](https://developer.apple.com/design/human-interface-guidelines/materials),
+  [Color](https://developer.apple.com/design/human-interface-guidelines/color),
+  [Typography](https://developer.apple.com/design/human-interface-guidelines/typography),
+  [Layout](https://developer.apple.com/design/human-interface-guidelines/layout),
+  [Buttons](https://developer.apple.com/design/human-interface-guidelines/buttons),
+  [Dark Mode](https://developer.apple.com/design/human-interface-guidelines/dark-mode),
+  [Motion](https://developer.apple.com/design/human-interface-guidelines/motion),
+  [Writing](https://developer.apple.com/design/human-interface-guidelines/writing)
+- [Liquid Glass overview](https://developer.apple.com/documentation/technologyoverviews/liquid-glass)
+  and [Adopting Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass)
 
-We looked at how the sites of similar tools are built (November 2026):
+We follow the guidelines; we don't copy Apple's pages, artwork or marks,
+and the footer says the project isn't Apple's.
 
-| Site | What makes it its own |
+## The rules, and where they come from
+
+| Rule on this site | What the HIG says |
 | --- | --- |
-| Raycast | The product drawn as real interface, a keyboard on the page, one red accent on black. |
-| Alfred | Its search box drawn in HTML with real result rows; light page. |
-| Sol | Numbered sections (00, 01, 02) and every feature shown by what you type: `42 * 2`. |
-| Maccy | Almost no design. "Does one job. Period." The voice carries it. |
-| Rectangle, Hammerspoon | Plain, document-like pages that read as written by the author. |
-| LaunchBar | Claims as headlines, long light page. |
-| Linear, Zed | Hairlines instead of cards, tight type, real interface instead of illustration. |
-
-What the good ones share: a point of view in the words, the product itself
-on the page, one accent colour, lines instead of boxes, and numbers.
-None of them needs glows.
-
-## The idea: a printed manual for a small tool
-
-The page reads like a well-set manual: paper, ink, one colour, numbered
-sections with a margin column. The one loud thing is the product itself: a
-launcher you can type in, sitting on a flat field of rust.
-
-## Rules
-
-1. **Show the thing.** The hero is a working imitation of the launcher. A
-   feature is explained by what you type and what comes back, never by an
-   icon and a blurb.
-2. **One colour.** Rust, used for the field, links' underlines, the "New"
-   word and the thing that is ours in a chart. Nothing else is coloured.
-3. **Lines, not boxes.** Content is separated by hairlines and space. No
-   cards, no shadows, no gradients, no blur. The only exceptions are the
-   glass panel (it is the product) and the shell block.
-4. **Left-aligned.** Nothing is centred except the panel inside its field.
-5. **Numbers come with how they were measured.**
-6. **No assets we can't draw in CSS.** The only images are the app icon and
-   the recorded demo. No stock art, no illustrations, no icon sets.
-7. **Nothing from anyone else's server.** System fonts, no trackers, no CDN.
+| **Two layers.** Glass is only the floating toolbar and the launcher panel. Everything you read sits on opaque tiles. | "Liquid Glass forms a distinct functional layer for controls and navigation… Don't use Liquid Glass in the content layer." |
+| **Glass is rare.** Two glass things per page, never one on another. | "Use Liquid Glass effects sparingly… avoid layering Liquid Glass elements on top of each other." |
+| **The toolbar is regular glass**, the panel is clear glass with a dark dimming layer, because it sits on a colourful stage. | Regular for components with text; clear "only… over visually rich backgrounds", with a dark dimming layer when the content is bright. |
+| **Content scrolls under the toolbar and fades at the top edge.** | Use a scroll edge effect rather than a solid bar behind controls. |
+| **Colour means "you can press this".** Orange is on the Install button, links and the phrases that can be tried. Headings and labels are never orange. | "Be judicious with your use of color in controls"; "avoid using the same color to mean different things." |
+| **System colours, with light, dark and increased-contrast values.** | "Make sure all your app's colors work well in light, dark, and increased contrast contexts." |
+| **One prominent button per view**; the second action is a plain link. | "Use a button that has a prominent visual style for the most likely action." |
+| **Capsules and concentric corners.** Tiles 28px, things inside them 9 to 12px, controls fully round. | "Rounded shapes that are concentric to their containers." |
+| **System fonts in the system's weights**: Regular, Semibold, Bold. Nothing lighter. | "Prefer Regular, Medium, Semibold, or Bold… avoid Ultralight, Thin, and Light." |
+| **No theme switch.** The page follows the system. | "Avoid offering an app-specific appearance setting." |
+| **Motion is brief and optional.** Presses scale, the list springs, the glass tint fades; all off under Reduce Motion. | "Aim for brevity and precision"; "make motion optional." |
+| **Reduce Transparency turns the glass opaque.** | Test with settings that "reduce transparency or motion". |
+| **Button and link labels are verbs or plain nouns.** | "Be action oriented… avoid the temptation to be too cute or clever." |
 
 ## Colour
 
+System colours as the HIG lists them. Tokens are in `style.css`.
+
 | Token | Light | Dark | Use |
 | --- | --- | --- | --- |
-| `--paper` | `#f3efe6` | `#151310` | Page |
-| `--paper-2` | `#e9e4d8` | `#1f1c18` | Typed text, inline code |
-| `--ink` | `#1a1815` | `#ece6da` | Text, heavy rules, the main button |
-| `--ink-2` | `#56514a` | `#b5ad9f` | Body copy beside a heading |
-| `--ink-3` | `#8b857b` | `#7f786d` | Labels, small print |
-| `--rule` | ink at 16% | ink at 15% | Hairlines |
-| `--rust` | `#b3410f` | `#ea7a40` | The accent |
-| `--field` | `#b3410f` | `#a63c0d` | The hero field |
+| `--bg` | `#f2f2f7` | `#000000` | Page (grouped background) |
+| `--tile` | `#ffffff` | `#1c1c1e` | Content tiles |
+| `--label` | black | white | Text |
+| `--label-2` | label at 72% | at 68% | Secondary text |
+| `--separator` | 18% | 60% of grey | Hairlines inside tiles, 0.5px |
+| `--fill` | grey at 12% | at 24% | Typed text, keys, number badges |
+| `--tint` | `#c55300` | `#ffa056` | Orange, accessible variant: links, the button |
+| `--orange` | `#ff8d28` | `#ff9230` | System orange: our bar in a chart, the caret. Never text |
+| `--green` | `#34c759` | `#30d158` | Switches that are on |
 
-Both themes follow the reader's system setting. The glass panel is the same
-in both.
+Plain system orange fails contrast as text on white, so text and the filled
+button use the HIG's accessible orange.
 
 ## Type
 
-Three system families, so no font is downloaded.
+`system-ui`, which is San Francisco on Apple devices. Mono is SF Mono, for
+anything typed. No fonts are downloaded.
 
-- **Serif** (`ui-serif`: New York on a Mac, then Iowan Old Style, Palatino,
-  Georgia) for headlines and big figures. Regular weight, tight tracking.
-  Italic in rust for the one word that lands the headline.
-- **Sans** (San Francisco) for running text, 17px.
-- **Mono** (SF Mono) for anything typed, and for labels: 12px, capitals,
-  tracked 0.08em.
-
-Sizes: h1 42 to 88px, h2 30 to 44px, h3 23px, deck 18 to 21px, small 14px.
+| Style | Size | Weight | Tracking |
+| --- | --- | --- | --- |
+| Large title (h1) | 44 to 80px | Bold | -0.03em |
+| Title (h2) | 32 to 48px | Bold | -0.025em |
+| Headline (h3) | 21px | Semibold | -0.018em |
+| Lead | 19 to 24px | Regular, secondary | -0.018em |
+| Body | 17px / 1.47 | Regular | -0.022em |
+| Footnote | 13px | Regular, secondary | -0.006em |
 
 ## Layout
 
-- Page width 1120px, 24px gutters (16px on phones).
-- A section is a 190px margin column (number and name, in mono) beside the
-  matter. A 1px ink rule runs across the top of both. On narrow screens the
-  margin column sits above.
-- 88px between sections, 36px from a section's intro to its content.
-- Corner radius: 6px on buttons, 8 to 10px on blocks, 26px on the glass
-  panel only.
+- Page 1024px wide, 22px margins (16px on phones).
+- The hero is centred. Sections lead from the left: eyebrow, title, lead,
+  then tiles 36px below.
+- 112px between sections, 16px between tiles, 28px padding inside a tile.
+- Lists are grouped lists, as in Settings: one tile, rows divided by inset
+  separators.
 
 ## Pieces
 
-- **Masthead**: wordmark in serif, three links, hairline under.
-- **Field**: flat rust, the shortcut set huge behind the glass in a darker
-  rust, the panel on top. A mono note at the bottom says it's an imitation.
-- **Phrase row**: plugin name, what to type, what it means. A phrase with a
-  rust underline is a button that types itself into the panel.
-- **Figures**: big serif numbers in a ruled row, with a plain bar chart
-  under them when two things are compared.
-- **Steps**: rust serif numerals, ruled rows.
-- **Keys**: `<kbd>`, outlined, heavier bottom edge.
-- **Changelog entry**: kind in the left column (New in rust; Improved and
-  Fixed in grey), serif title, plain text. Dates sit in the margin column.
+- **Toolbar**: a glass capsule that floats and stays. Name, two items, the
+  Install button.
+- **Stage**: a dark tile with large crisp circles in system colours, drawn
+  in SVG, so the glass has something real to blur. Shapes stay sharp; we
+  never draw blurred blobs.
+- **Panel**: the launcher. It works, and its glass takes the colour of the
+  selected row, as the app's does.
+- **Phrase list**: plugin, what to type, what it means. Orange phrases type
+  themselves into the panel.
+- **Switches**: the system's shape and green.
+- **Figures**: one number per tile; a bar chart when two things compare.
+- **Shell block**: always dark, with a capsule Copy button.
 
 ## Voice
 
-Short, plain, a little dry. Say what it does and what to type. Prefer a
-number to an adjective. Admit limits ("this one is an imitation"). No
-"blazing", "seamless", "powerful", "supercharge", no exclamation marks, no
-emoji.
+Short and plain. Say what it does and what to type; give a number where an
+adjective would go. Titles end with a full stop. No "blazing", "seamless",
+"powerful", no exclamation marks, no emoji.
 
 ## Don't
 
-Blurred blobs or glows. Gradients. Glass cards. Pills and badges. Centred
-heroes. Grids of feature cards. Icons beside headings. Shadows on content.
-A second accent colour. Web fonts. Screenshots as decoration.
+Glass tiles in the content. Glass on glass. Blurred blobs or glows.
+Gradients on text or buttons. Orange headings. A second accent colour.
+Light font weights. Web fonts. Apple's logo, product images or page copy.
+Assets made by capturing someone's screen.
