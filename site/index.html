@@ -35,13 +35,35 @@
 
       <div class="stage" id="try">
         <svg class="art" viewBox="0 0 1000 540" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-          <defs><pattern id="hatch" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><rect width="14" height="14" fill="#16161f"/><rect width="2" height="14" fill="#2a2a3a"/></pattern></defs>
-          <rect width="1000" height="540" fill="url(#hatch)"/>
-          <circle cx="170" cy="60" r="250" fill="#ff8d28"/>
-          <circle cx="860" cy="130" r="210" fill="#6d7cff"/>
-          <circle cx="640" cy="560" r="220" fill="#00c8b3"/>
-          <circle cx="330" cy="430" r="120" fill="#ff2d55"/>
-          <circle cx="930" cy="470" r="90" fill="#ffcc00"/>
+          <defs>
+            <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#150b2e"/><stop offset=".55" stop-color="#2a1140"/><stop offset="1" stop-color="#0a0710"/></linearGradient>
+            <radialGradient id="haze" cx=".78" cy=".12" r=".7"><stop offset="0" stop-color="#5a48ff" stop-opacity=".75"/><stop offset=".45" stop-color="#4a2bb8" stop-opacity=".3"/><stop offset="1" stop-color="#4a2bb8" stop-opacity="0"/></radialGradient>
+            <radialGradient id="sun" cx=".42" cy=".36" r=".7"><stop offset="0" stop-color="#ffe3a1"/><stop offset=".38" stop-color="#ffab45"/><stop offset=".8" stop-color="#ff6a2b"/><stop offset="1" stop-color="#f0482a"/></radialGradient>
+            <radialGradient id="glow" cx=".5" cy=".5" r=".5"><stop offset=".45" stop-color="#ff8d28" stop-opacity=".5"/><stop offset="1" stop-color="#ff8d28" stop-opacity="0"/></radialGradient>
+            <linearGradient id="far" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7a2bd0"/><stop offset=".55" stop-color="#c22d7c"/><stop offset="1" stop-color="#5b3df0"/></linearGradient>
+            <linearGradient id="mid" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff2d55"/><stop offset=".6" stop-color="#ff5a2b"/><stop offset="1" stop-color="#d42a78"/></linearGradient>
+            <linearGradient id="near" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff8d28"/><stop offset=".5" stop-color="#ffb347"/><stop offset="1" stop-color="#ff6a2b"/></linearGradient>
+            <linearGradient id="shade" gradientUnits="userSpaceOnUse" x1="0" y1="130" x2="0" y2="540"><stop offset="0" stop-color="#0a0510" stop-opacity="0"/><stop offset="1" stop-color="#0a0510" stop-opacity=".72"/></linearGradient>
+            <linearGradient id="rim" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+            <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .5 0"/></filter>
+          </defs>
+          <rect width="1000" height="540" fill="url(#sky)"/>
+          <rect width="1000" height="540" fill="url(#haze)"/>
+          <circle cx="235" cy="235" r="330" fill="url(#glow)"/>
+          <circle cx="235" cy="235" r="170" fill="url(#sun)"/>
+          <g>
+            <path id="w1" d="M0 312C170 214 400 150 620 214S900 232 1000 132V540H0Z" fill="url(#far)"/>
+            <path d="M0 312C170 214 400 150 620 214S900 232 1000 132V540H0Z" fill="url(#shade)"/>
+            <path d="M0 312C170 214 400 150 620 214S900 232 1000 132" fill="none" stroke="url(#rim)" stroke-width="1.5"/>
+            <path d="M0 398C190 296 380 262 570 322S880 346 1000 250V540H0Z" fill="url(#mid)"/>
+            <path d="M0 398C190 296 380 262 570 322S880 346 1000 250V540H0Z" fill="url(#shade)" opacity=".8"/>
+            <path d="M0 398C190 296 380 262 570 322S880 346 1000 250" fill="none" stroke="url(#rim)" stroke-width="1.5"/>
+            <path d="M0 470C220 384 410 376 610 436S900 460 1000 392V540H0Z" fill="url(#near)"/>
+            <path d="M0 470C220 384 410 376 610 436S900 460 1000 392V540H0Z" fill="url(#shade)" opacity=".42"/>
+            <path d="M0 470C220 384 410 376 610 436S900 460 1000 392" fill="none" stroke="url(#rim)" stroke-width="1.5"/>
+            <path d="M0 526C250 470 460 486 660 516S920 528 1000 500V540H0Z" fill="#12070c" opacity=".7"/>
+          </g>
+          <rect width="1000" height="540" filter="url(#grain)" opacity=".09"/>
         </svg>
         <div class="panel" id="panel">
           <label class="ask">
@@ -50,8 +72,8 @@
           </label>
           <ul class="rows" id="rows" role="listbox" aria-label="Results"></ul>
         </div>
-        <p class="caption">Type in it. This one is an imitation running in your browser; the real one is quicker.</p>
       </div>
+      <p class="caption footnote">Type in it. This one is an imitation running in your browser; the real one is quicker.</p>
     </section>
 
     <section class="section" id="phrasebook">

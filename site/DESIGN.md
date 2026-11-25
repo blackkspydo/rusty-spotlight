@@ -85,9 +85,11 @@ anything typed. No fonts are downloaded.
 
 - **Toolbar**: a glass capsule that floats and stays. Name, two items, the
   Install button.
-- **Stage**: a dark tile with large crisp circles in system colours, drawn
-  in SVG, so the glass has something real to blur. Shapes stay sharp; we
-  never draw blurred blobs.
+- **Stage**: a dark tile holding a wallpaper drawn in SVG: a low sun and
+  three layered ridges in orange, red and violet, each shaded towards the
+  bottom with a thin lit edge, and a little grain. It gives the glass real
+  colour to blur. Edges stay sharp; the only soft things are the sky's haze
+  and the sun's glow.
 - **Panel**: the launcher. It works, and its glass takes the colour of the
   selected row, as the app's does.
 - **Phrase list**: plugin, what to type, what it means. Orange phrases type
@@ -104,7 +106,7 @@ adjective would go. Titles end with a full stop. No "blazing", "seamless",
 
 ## Don't
 
-Glass tiles in the content. Glass on glass. Blurred blobs or glows.
+Glass tiles in the content. Glass on glass. Blurred blobs as decoration.
 Gradients on text or buttons. Orange headings. A second accent colour.
 Light font weights. Web fonts. Apple's logo, product images or page copy.
 Assets made by capturing someone's screen.
