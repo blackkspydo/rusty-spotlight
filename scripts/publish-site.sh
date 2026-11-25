@@ -13,6 +13,7 @@ entry() { # mode, file on disk, name on the site
 TREE=$({
   entry 100644 site/index.html index.html
   entry 100644 site/changelog.html changelog.html
+  entry 100644 site/style.css style.css
   entry 100644 assets/demo.mp4 demo.mp4
   entry 100644 assets/demo-poster.png demo-poster.png
   entry 100644 assets/AppIcon.png AppIcon.png
