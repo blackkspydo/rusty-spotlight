@@ -22,14 +22,25 @@ A fast Spotlight replacement for macOS, written in Rust. It looks and moves like
 
 Return copies the answer to a sum, conversion or question, and opens a file or folder. Images in the clipboard history are stored on disk, with a small thumbnail kept for the list.
 
-## Requirements
+## Install with Homebrew
+
+Rusty Spotlight runs on Apple silicon and Intel Macs with macOS 26 (Tahoe) or later. If you're switching from a source install, run `./scripts/uninstall.sh` from your checkout first to remove its login item.
+
+```sh
+brew install --cask blackkspydo/tap/rusty-spotlight
+open -a "Rusty Spotlight"
+```
+
+Press **Option-Space** to open the launcher. To update, run `brew upgrade --cask rusty-spotlight`. To remove the app, run `brew uninstall --cask rusty-spotlight`.
+
+## Source build requirements
 
 - **macOS 26 (Tahoe) or later.** The panel is drawn on the system's Liquid Glass, which older versions don't have.
 - **Xcode Command Line Tools,** for the linker and `codesign`. Install them with `xcode-select --install`.
 - **Rust,** through [rustup](https://rustup.rs). The repository pins the version in `rust-toolchain.toml`; rustup downloads it on the first build.
 - About 1 GB of free disk space for the build folder. The installed app is under 2 MB.
 
-## Install
+## Install from source
 
 ```sh
 # 1. Rust, if you don't have it yet
@@ -138,7 +149,7 @@ Everything Settings changes is saved in `~/.config/rusty-spotlight/config.toml`.
 | Exchange rate cache | `~/Library/Application Support/rusty-spotlight/rates.tsv` |
 | Log | `~/Library/Logs/rusty-spotlight/launcher.log` |
 
-## Update
+## Update a source install
 
 ```sh
 git pull
@@ -147,7 +158,7 @@ git pull
 
 The script rebuilds and replaces the installed copy. Your settings, learned ranking and the Input Monitoring permission are kept.
 
-## Uninstall
+## Remove a source install
 
 ```sh
 ./scripts/uninstall.sh

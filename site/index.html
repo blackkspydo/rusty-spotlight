@@ -25,7 +25,7 @@
   <main>
     <section class="hero">
       <!-- Keep this line on the newest thing in the changelog. -->
-      <p class="eyebrow"><a class="more" href="changelog.html">New: System Settings search, Homebrew and clipboard history</a></p>
+      <p class="eyebrow"><a class="more" href="changelog.html">New in 0.1.0 · Install with Homebrew</a></p>
       <h1>Two keys. A few letters. Done.</h1>
       <p class="lead">Rusty Spotlight replaces Spotlight on macOS 26. It's written in Rust, drawn on Liquid Glass, and on screen in 22 milliseconds.</p>
       <div class="actions">
@@ -160,23 +160,17 @@
     <section class="section" id="install">
       <header>
         <p class="eyebrow">Install</p>
-        <h2>Built on your Mac, from the source.</h2>
-        <p class="lead">It takes a minute or two the first time. Requires macOS 26 or later.</p>
+        <h2>Install with Homebrew.</h2>
+        <p class="lead">For Apple silicon and Intel Macs running macOS 26 or later.</p>
       </header>
-      <pre class="shell"><button class="copy" data-copy="install-code">Copy</button><code id="install-code"><span class="c"># Xcode Command Line Tools and Rust, if you don't have them</span>
-xcode-select --install
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-<span class="c"># Build, install to /Applications, and start at login</span>
-git clone https://github.com/blackkspydo/rusty-spotlight.git
-cd rusty-spotlight
-./scripts/install.sh</code></pre>
+      <pre class="shell"><button class="copy" data-copy="install-code">Copy</button><code id="install-code">brew install --cask blackkspydo/tap/rusty-spotlight
+open -a "Rusty Spotlight"</code></pre>
       <ol class="tile list steps">
         <li><span><b>Press <kbd>⌥</kbd> <kbd>Space</kbd></b> to open it. A magnifying glass appears in the menu bar.</span></li>
         <li><span><b>Allow Input Monitoring</b> when macOS asks, so other apps can't delay or swallow the shortcut. It watches for its own shortcut and nothing else.</span></li>
         <li><span><b>To use <kbd>⌘</kbd> <kbd>Space</kbd>,</b> turn off Spotlight's shortcut in System Settings › Keyboard › Keyboard Shortcuts › Spotlight, then record Command-Space in Rusty Spotlight's Settings.</span></li>
       </ol>
-      <p class="footnote after">Update with <code>git pull &amp;&amp; ./scripts/install.sh</code>. Remove with <code>./scripts/uninstall.sh</code>. The rest is in the <a href="https://github.com/blackkspydo/rusty-spotlight#readme">README</a>.</p>
+      <p class="footnote after">Switching from a source build? Run <code>./scripts/uninstall.sh</code> in your checkout first. Source installation and update instructions are in the <a href="https://github.com/blackkspydo/rusty-spotlight#readme">README</a>.</p>
     </section>
   </main>
 
