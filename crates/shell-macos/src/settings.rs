@@ -18,7 +18,7 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_clas
 use objc2_app_kit::{
     NSApplication, NSBackingStoreType, NSBezelStyle, NSBorderType, NSBox, NSBoxType, NSButton, NSColor, NSColorWell,
     NSControlStateValueOff, NSControlStateValueOn, NSEvent, NSEventMask, NSEventModifierFlags, NSFont,
-    NSFontWeightMedium, NSGlassEffectView, NSImage, NSImageSymbolConfiguration, NSImageView,
+    NSFontWeightMedium, NSImage, NSImageSymbolConfiguration, NSImageView,
     NSMenu, NSMenuItem, NSPopUpButton, NSScrollView, NSSlider, NSStatusBar, NSSwitch, NSStatusItem,
     NSTabViewController, NSTabViewControllerTabStyle, NSTabViewItem, NSTableColumn, NSTableView,
     NSTableViewDataSource, NSTextAlignment, NSTextField, NSVariableStatusItemLength, NSView, NSViewController,
@@ -1003,9 +1003,6 @@ fn general(mtm: MainThreadMarker) -> Retained<NSViewController> {
 fn appearance(mtm: MainThreadMarker) -> Retained<NSViewController> {
     let mut f = Form::new(372.0, mtm);
 
-    // A small panel on glass, tinted as the launcher will be.
-    let glass = NSGlassEffectView::initWithFrame(NSGlassEffectView::alloc(mtm), NSRect::ZERO);
-    glass.setCornerRadius(26.0);
     let inside = NSView::initWithFrame(NSView::alloc(mtm), NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(400.0, 56.0)));
     if let Some(tint) = theme::Tint::new(inside.bounds(), mtm) {
         inside.addSubview(tint.view());
@@ -1024,8 +1021,8 @@ fn appearance(mtm: MainThreadMarker) -> Retained<NSViewController> {
     let icon = NSImageView::imageViewWithImage(&safari, mtm);
     icon.setFrame(NSRect::new(NSPoint::new(352.0, 12.0), NSSize::new(32.0, 32.0)));
     inside.addSubview(&icon);
-    glass.setContentView(Some(&inside));
-    f.place(&glass, (WIDTH - 400.0) / 2.0, f.y, 400.0, 56.0);
+    let preview = crate::surface::background(mtm, inside.frame(), 26.0, &inside);
+    f.place(&preview, (WIDTH - 400.0) / 2.0, f.y, 400.0, 56.0);
     f.y += 56.0;
     let caption = label("Preview, with Safari selected", 11.0, true, mtm);
     caption.setAlignment(NSTextAlignment::Center);

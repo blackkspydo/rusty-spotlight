@@ -39,7 +39,7 @@ Press **Option-Space** to open the launcher. To update, run `brew upgrade --cask
 
 ## Source build requirements
 
-- **macOS 26 (Tahoe) or later.** The panel is drawn on the system's Liquid Glass, which older versions don't have.
+- The development build targets **macOS 14 (Sonoma) or later**. Sonoma and Sequoia use native blur. Tahoe and later use Liquid Glass when available. The published 0.1.0 release requires Tahoe.
 - **Xcode Command Line Tools,** for the linker and `codesign`. Install them with `xcode-select --install`.
 - **Rust,** through [rustup](https://rustup.rs). The repository pins the version in `rust-toolchain.toml`; rustup downloads it on the first build.
 - About 1 GB of free disk space for the build folder. The installed app is under 2 MB.

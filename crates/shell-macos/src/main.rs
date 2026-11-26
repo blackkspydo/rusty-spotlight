@@ -21,6 +21,7 @@ mod rates;
 mod settings;
 mod spaces;
 mod store;
+mod surface;
 mod syssettings;
 mod theme;
 mod ui;

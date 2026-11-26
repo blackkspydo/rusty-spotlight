@@ -19,12 +19,11 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_se
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackgroundStyle, NSBackingStoreType, NSBezierPath, NSBox, NSBoxType, NSColor, NSControl,
     NSControlTextEditingDelegate, NSEvent, NSEventModifierFlags, NSFloatingWindowLevel, NSFocusRingType, NSFont,
-    NSFontWeightMedium, NSGlassEffectView, NSImage, NSImageScaling, NSImageView,
+    NSFontWeightMedium, NSImage, NSImageScaling, NSImageView,
     NSModalPanelWindowLevel, NSPanel, NSPasteboard, NSPasteboardTypeString, NSPopUpMenuWindowLevel, NSScreen, NSScreenSaverWindowLevel,
     NSScrollView, NSStatusWindowLevel, NSTableColumn, NSTableRowView, NSTableView,
     NSTableViewDataSource, NSTableViewDelegate, NSTableViewSelectionHighlightStyle,
     NSTableViewStyle, NSTextField, NSTextFieldDelegate, NSTextInputClient, NSTextInputTraitType, NSTextView, NSView,
-    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
     NSWindowAnimationBehavior, NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
     NSWorkspaceOpenConfiguration,
 };
@@ -701,8 +700,12 @@ impl Controller {
         field.setTextColor(Some(&strong_label(mtm)));
         // No system suggestion popups under the field: this panel draws its own results.
         field.setAutomaticTextCompletionEnabled(false);
-        field.setAllowsWritingTools(false);
-        field.setAllowsWritingToolsAffordance(false);
+        if objc2::available!(macos = 15.2) {
+            field.setAllowsWritingTools(false);
+        }
+        if objc2::available!(macos = 15.4) {
+            field.setAllowsWritingToolsAffordance(false);
+        }
         content.addSubview(&field);
 
         let glyph = NSImage::imageWithSystemSymbolName_accessibilityDescription(&ns("magnifyingglass"), None)
@@ -784,34 +787,7 @@ impl Controller {
 
         let root = NSView::initWithFrame(NSView::alloc(mtm), window_rect);
         root.setWantsLayer(true);
-        let surface: Retained<NSView> = if env("RS_MATERIAL", "glass") == "blur" {
-            let blur = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), rect);
-            blur.setMaterial(NSVisualEffectMaterial::HUDWindow);
-            blur.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-            blur.setState(NSVisualEffectState::Active);
-            blur.setWantsLayer(true);
-            unsafe {
-                let layer: Option<Retained<AnyObject>> = msg_send![&*blur, layer];
-                if let Some(layer) = layer {
-                    let _: () = msg_send![&*layer, setCornerRadius: RADIUS];
-                    let _: () = msg_send![&*layer, setMasksToBounds: true];
-                }
-            }
-            clip.setAutoresizingMask(
-                objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable
-                    | objc2_app_kit::NSAutoresizingMaskOptions::ViewHeightSizable,
-            );
-            blur.addSubview(&clip);
-            Retained::into_super(blur)
-        } else {
-            let glass = NSGlassEffectView::initWithFrame(NSGlassEffectView::alloc(mtm), rect);
-            glass.setCornerRadius(RADIUS);
-            if env("RS_GLASS", "regular") == "clear" {
-                glass.setStyle(objc2_app_kit::NSGlassEffectViewStyle::Clear);
-            }
-            glass.setContentView(Some(&clip));
-            Retained::into_super(glass)
-        };
+        let surface = crate::surface::background(mtm, rect, RADIUS, &clip);
         surface.setWantsLayer(true);
         // The drop shadow is a rounded shadow path on a layer of its own; the
         // window's own shadow is rectangular and stays off.
@@ -959,7 +935,9 @@ impl Controller {
             if let Some(editor) = s.field.currentEditor() {
                 if let Ok(editor) = editor.downcast::<NSTextView>() {
                     editor.setInlinePredictionType(NSTextInputTraitType::No);
-                    editor.setMathExpressionCompletionType(NSTextInputTraitType::No);
+                    if objc2::available!(macos = 15.0) {
+                        editor.setMathExpressionCompletionType(NSTextInputTraitType::No);
+                    }
                     editor.setAutomaticTextCompletionEnabled(false);
                     editor.setContinuousSpellCheckingEnabled(false);
                 }
