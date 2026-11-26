@@ -4,8 +4,7 @@ cask "rusty-spotlight" do
   version "@VERSION@"
   sha256 "@SHA256@"
 
-  url "https://github.com/blackkspydo/rusty-spotlight/releases/download/v#{version}/Rusty-Spotlight-#{version}.zip",
-      verified: "github.com/blackkspydo/rusty-spotlight/"
+  url "https://github.com/blackkspydo/rusty-spotlight/releases/download/v#{version}/Rusty-Spotlight-#{version}.zip"
   name "Rusty Spotlight"
   desc "Spotlight replacement written in Rust"
   homepage "https://blackkspydo.github.io/rusty-spotlight/"
@@ -15,7 +14,7 @@ cask "rusty-spotlight" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :tahoe"
+  depends_on macos: :tahoe
 
   app "Rusty Spotlight.app"
 
