@@ -24,7 +24,7 @@ Return copies the answer to a sum, conversion or question, and opens a file or f
 
 ## Install with Homebrew
 
-Rusty Spotlight runs on Apple silicon and Intel Macs with macOS 26 (Tahoe) or later. If you're switching from a source install, run `./scripts/uninstall.sh` from your checkout first to remove its login item.
+Version 0.1.1 targets Apple silicon and Intel Macs running macOS 14 (Sonoma) or later. Runtime testing on Sonoma is pending. If you're switching from a source install, run `./scripts/uninstall.sh` from your checkout first to remove its login item.
 
 For a first install, use the project's Homebrew tap.
 
@@ -39,7 +39,7 @@ Press **Option-Space** to open the launcher. To update, run `brew upgrade --cask
 
 ## Source build requirements
 
-- The development build targets **macOS 14 (Sonoma) or later**. Sonoma and Sequoia use native blur. Tahoe and later use Liquid Glass when available. The published 0.1.0 release requires Tahoe.
+- The development build targets **macOS 14 (Sonoma) or later**. Sonoma and Sequoia use native blur. Tahoe and later use Liquid Glass when available.
 - **Xcode Command Line Tools,** for the linker and `codesign`. Install them with `xcode-select --install`.
 - **Rust,** through [rustup](https://rustup.rs). The repository pins the version in `rust-toolchain.toml`; rustup downloads it on the first build.
 - About 1 GB of free disk space for the build folder. The installed app is under 2 MB.

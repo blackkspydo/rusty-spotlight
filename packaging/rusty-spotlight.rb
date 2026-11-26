@@ -27,6 +27,8 @@ cask "rusty-spotlight" do
   ]
 
   caveats <<~EOS
+    This build targets macOS 14 and later. Runtime testing on Sonoma is pending.
+
     Open Rusty Spotlight once from Applications; it then opens at login.
     Option-Space opens it until you choose another shortcut in Settings.
 
