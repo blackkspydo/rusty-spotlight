@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rusty Spotlight · Sonoma compatibility design</title>
+<style>
+:root {color-scheme: light dark; font-family:var(--font-sans,system-ui,sans-serif); color:var(--foreground,CanvasText)}
+* {box-sizing:border-box}
+body {margin:0;line-height:1.5}
+main {max-width:960px;margin:auto}
+h1 {font-size:clamp(1.6rem,4vw,2.35rem);line-height:1.12;letter-spacing:-.04em;margin:.25em 0}
+h2 {font-size:1.05rem;margin:.3rem 0 .6rem}
+p {margin:.45rem 0 .9rem}
+fieldset {border:0;padding:0;margin:1.3rem 0 .8rem}
+legend {font-weight:650;margin-bottom:.4rem}
+label {display:inline-block;cursor:pointer;padding:.4rem .8rem;border:1px solid var(--border,GrayText);border-radius:2rem;margin:0 .2rem .4rem 0}
+label:has(:checked) {background:var(--secondary,ButtonFace);outline:1px solid currentColor}
+input {accent-color:var(--primary,#4574ae)}
+.grid {display:grid;grid-template-columns:1.15fr 1fr;gap:12px}
+figure {margin:0;min-width:0}
+figcaption {font-size:.9rem;font-weight:650;margin-bottom:.4rem}
+.scene {color:white;min-height:195px;display:grid;align-items:center;padding:16px;border-radius:var(--radius,14px);background:radial-gradient(ellipse at 100% 0%,#c18569,transparent 62%),linear-gradient(150deg,#233c54 18%,#56837c 52%,#224b51 53%,#263b48 84%)}
+.panel {padding:12px;border-radius:17px;border:1px solid #ffffff45;background:#293944cf;box-shadow:0 6px 20px #10192440;backdrop-filter:blur(16px)}
+body:has(#tahoe:checked) .panel {background:linear-gradient(120deg,#e4faff47,#132e3a78 50%,#e4faff35);border-color:#ffffffa8;box-shadow:inset 0 1px 2px #fff8,0 8px 20px #10273048;backdrop-filter:blur(9px) saturate(1.5)}
+.query {font-size:1.2rem;margin:0 0 .55rem;padding:0 4px .45rem;border-bottom:1px solid #fff4}
+.row {display:flex;gap:.6rem;align-items:center;padding:.35rem .5rem;border-radius:9px}
+.selected {background:#7eaece55}
+.icon {display:grid;place-items:center;width:25px;height:25px;border-radius:7px;background:#e6f5ff;color:#255780;font-weight:700}
+.material {font-size:.9rem;margin-top:.8rem}
+.glass,body:has(#tahoe:checked) .blur {display:none}
+body:has(#tahoe:checked) .glass {display:inline}
+details {margin-top:.8rem;border-top:1px solid var(--border,GrayText);padding-top:.7rem}
+summary {cursor:pointer;font-weight:650}
+ul {padding-left:1.4rem}
+@media(max-width:560px){.grid{grid-template-columns:1fr}.scene{min-height:140px}}
+</style>
+</head>
+<body><main>
+<h1>Rusty Spotlight on Sonoma</h1>
+<p>Proposed for the next universal release on Intel and Apple silicon. The published 0.1.0 release requires macOS Tahoe.</p>
+<fieldset><legend>Preview by macOS version</legend>
+<label><input type="radio" name="os" id="sonoma" checked> Sonoma 14 / Sequoia 15</label>
+<label><input type="radio" name="os" id="tahoe"> Tahoe 26 and later</label></fieldset>
+<div class="grid">
+<figure><figcaption>Launcher</figcaption><div class="scene"><div class="panel">
+<div class="query">⌕ &nbsp;saf</div><div class="row selected"><span class="icon" aria-hidden="true">↗</span>Safari</div>
+</div></div></figure>
+<figure><figcaption>Settings › Appearance preview</figcaption><div class="scene"><div class="panel">
+<div class="row"><span aria-hidden="true">⌕</span> Safari <span class="icon" aria-hidden="true" style="margin-left:auto">↗</span></div>
+</div></div></figure>
+</div>
+<p class="material"><strong>Automatic material · </strong><span class="blur">Native HUD blur</span><span class="glass">Liquid Glass when available</span>. These illustrations approximate the AppKit materials.</p>
+<details open><summary>Release criteria</summary><ul>
+<li>Set the minimum to macOS 14.0 for both binary architectures, the app bundle, and the Homebrew cask. Check linked symbols and AppKit calls for Sonoma compatibility.</li>
+<li>Use the same material selection in both windows, preserve the selected app’s tint, and keep the existing bundle identifier, settings, shortcuts, and cask name.</li>
+<li>Test the signed app on Sonoma: cold launch, global shortcut, app search and launch, Appearance preview, and login-item registration. On Tahoe or later, exercise both glass and forced blur.</li>
+</ul></details>
+</main></body></html>
