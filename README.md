@@ -27,7 +27,6 @@ Return copies the answer to a sum, conversion or question, and opens a file or f
 Rusty Spotlight runs on Apple silicon and Intel Macs with macOS 26 (Tahoe) or later. If you're switching from a source install, run `./scripts/uninstall.sh` from your checkout first to remove its login item.
 
 ```sh
-brew trust --cask blackkspydo/tap/rusty-spotlight
 brew install --cask blackkspydo/tap/rusty-spotlight
 open -a "Rusty Spotlight"
 ```
