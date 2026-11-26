@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rusty Spotlight</title>
+<meta name="description" content="A Spotlight replacement for macOS, written in Rust. Apps, sums, currency, units, world time, System Settings and more from one field, on screen in 22 ms.">
+<meta property="og:title" content="Rusty Spotlight">
+<meta property="og:description" content="A Spotlight replacement for macOS, written in Rust. On screen in 22 ms.">
+<meta property="og:image" content="demo-poster.png">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="AppIcon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="edge" aria-hidden="true"></div>
+<div class="wrap">
+  <header class="toolbar glass">
+    <a class="name" href="./"><img src="AppIcon.png" alt="">Rusty Spotlight</a>
+    <a class="item" href="changelog.html">Changelog</a>
+    <a class="item gh" href="https://github.com/blackkspydo/rusty-spotlight">GitHub</a>
+    <a class="button small" href="#install">Install</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <!-- Keep this line on the newest thing in the changelog. -->
+      <p class="eyebrow"><a class="more" href="changelog.html">New in 0.1.1 · Native blur on older Macs</a></p>
+      <h1>Two keys. A few letters. Done.</h1>
+      <p class="lead">Rusty Spotlight is a keyboard launcher written in Rust. It uses native blur on Sonoma and Sequoia and Liquid Glass on Tahoe and later.</p>
+      <div class="actions">
+        <a class="button" href="#install">Install</a>
+        <a class="more" href="https://github.com/blackkspydo/rusty-spotlight">View the source on GitHub</a>
+      </div>
+
+      <div class="stage" id="try">
+        <svg class="art" viewBox="0 0 1000 540" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <defs>
+            <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#150b2e"/><stop offset=".55" stop-color="#2a1140"/><stop offset="1" stop-color="#0a0710"/></linearGradient>
+            <radialGradient id="haze" cx=".78" cy=".12" r=".7"><stop offset="0" stop-color="#5a48ff" stop-opacity=".75"/><stop offset=".45" stop-color="#4a2bb8" stop-opacity=".3"/><stop offset="1" stop-color="#4a2bb8" stop-opacity="0"/></radialGradient>
+            <radialGradient id="sun" cx=".42" cy=".36" r=".7"><stop offset="0" stop-color="#ffe3a1"/><stop offset=".38" stop-color="#ffab45"/><stop offset=".8" stop-color="#ff6a2b"/><stop offset="1" stop-color="#f0482a"/></radialGradient>
+            <radialGradient id="glow" cx=".5" cy=".5" r=".5"><stop offset=".45" stop-color="#ff8d28" stop-opacity=".5"/><stop offset="1" stop-color="#ff8d28" stop-opacity="0"/></radialGradient>
+            <linearGradient id="far" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7a2bd0"/><stop offset=".55" stop-color="#c22d7c"/><stop offset="1" stop-color="#5b3df0"/></linearGradient>
+            <linearGradient id="mid" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff2d55"/><stop offset=".6" stop-color="#ff5a2b"/><stop offset="1" stop-color="#d42a78"/></linearGradient>
+            <linearGradient id="near" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff8d28"/><stop offset=".5" stop-color="#ffb347"/><stop offset="1" stop-color="#ff6a2b"/></linearGradient>
+            <linearGradient id="shade" gradientUnits="userSpaceOnUse" x1="0" y1="130" x2="0" y2="540"><stop offset="0" stop-color="#0a0510" stop-opacity="0"/><stop offset="1" stop-color="#0a0510" stop-opacity=".72"/></linearGradient>
+            <linearGradient id="rim" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+            <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .5 0"/></filter>
+          </defs>
+          <rect width="1000" height="540" fill="url(#sky)"/>
+          <rect width="1000" height="540" fill="url(#haze)"/>
+          <circle cx="235" cy="235" r="330" fill="url(#glow)"/>
+          <circle cx="235" cy="235" r="170" fill="url(#sun)"/>
+          <g>
+            <path id="w1" d="M0 312C170 214 400 150 620 214S900 232 1000 132V540H0Z" fill="url(#far)"/>
+            <path d="M0 312C170 214 400 150 620 214S900 232 1000 132V540H0Z" fill="url(#shade)"/>
+            <path d="M0 312C170 214 400 150 620 214S900 232 1000 132" fill="none" stroke="url(#rim)" stroke-width="1.5"/>
+            <path d="M0 398C190 296 380 262 570 322S880 346 1000 250V540H0Z" fill="url(#mid)"/>
+            <path d="M0 398C190 296 380 262 570 322S880 346 1000 250V540H0Z" fill="url(#shade)" opacity=".8"/>
+            <path d="M0 398C190 296 380 262 570 322S880 346 1000 250" fill="none" stroke="url(#rim)" stroke-width="1.5"/>
+            <path d="M0 470C220 384 410 376 610 436S900 460 1000 392V540H0Z" fill="url(#near)"/>
+            <path d="M0 470C220 384 410 376 610 436S900 460 1000 392V540H0Z" fill="url(#shade)" opacity=".42"/>
+            <path d="M0 470C220 384 410 376 610 436S900 460 1000 392" fill="none" stroke="url(#rim)" stroke-width="1.5"/>
+            <path d="M0 526C250 470 460 486 660 516S920 528 1000 500V540H0Z" fill="#12070c" opacity=".7"/>
+          </g>
+          <rect width="1000" height="540" filter="url(#grain)" opacity=".09"/>
+        </svg>
+        <div class="panel" id="panel">
+          <label class="ask">
+            <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></svg>
+            <input id="q" type="text" placeholder="Search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Try the launcher" aria-controls="rows">
+          </label>
+          <ul class="rows" id="rows" role="listbox" aria-label="Results"></ul>
+        </div>
+      </div>
+      <p class="caption footnote">Type in it. This one is an imitation running in your browser; the real one is quicker.</p>
+    </section>
+
+    <section class="section" id="phrasebook">
+      <header>
+        <p class="eyebrow">What to type</p>
+        <h2>Say what you mean.</h2>
+        <p class="lead">There's no syntax to learn. The answer is the first row. Return opens it or copies it.</p>
+      </header>
+      <div class="tile list">
+        <div class="phrase"><span class="who">Apps</span><span class="say"><button class="try">saf</button><button class="try">term</button></span><span class="means">Opens the app, or <b>switches to it</b> if it's already open. It learns which result you pick.</span></div>
+        <div class="phrase"><span class="who">Calculator</span><span class="say"><button class="try">15% of 2400</button><button class="try">2400 + 18%</button></span><span class="means"><b>360</b> and <b>2,832</b>. Return copies the answer.</span></div>
+        <div class="phrase"><span class="who">Currency</span><span class="say"><button class="try">100 usd to inr</button><span class="typed">$100</span></span><span class="means">Live rates, kept on disk so it still answers offline.</span></div>
+        <div class="phrase"><span class="who">Units</span><span class="say"><button class="try">5 km to mi</button><button class="try">100 f to c</button></span><span class="means"><b>3.107 mi</b> and <b>37.78 °C</b>. Length, weight, temperature and the rest.</span></div>
+        <div class="phrase"><span class="who">World time</span><span class="say"><button class="try">time in tokyo</button><span class="typed">3pm ist to sydney</span></span><span class="means">The time there now, or your meeting in their afternoon. Summer time included.</span></div>
+        <div class="phrase"><span class="who">System Settings</span><span class="say"><button class="try">night shift</button><button class="try">tap to click</button></span><span class="means">Opens System Settings <b>at that setting</b>. About 650 places, read from your own Mac.</span></div>
+        <div class="phrase"><span class="who">Websites</span><span class="say"><span class="typed">gh rust-lang/rust</span><span class="typed">yt lofi</span></span><span class="means">Your own keywords for the sites you search, or a bare address.</span></div>
+        <div class="phrase"><span class="who">Ask</span><span class="say"><span class="typed">? how do I untar a file</span></span><span class="means">Hands the question to Claude Code, Codex or Grok, whichever is already on your Mac, and shows the answer.</span></div>
+        <div class="phrase"><span class="who">Homebrew <i>Off until you turn it on</i></span><span class="say"><button class="try">brew ripgrep</button></span><span class="means">Every formula and cask, best match first, then most installed. Return installs it.</span></div>
+        <div class="phrase"><span class="who">Clipboard <i>Off until you turn it on</i></span><span class="say"><span class="typed">clip</span></span><span class="means">What you copied lately: text, images, files. Anything a password manager marks secret is never kept.</span></div>
+        <div class="phrase"><span class="who">Files <i>Off until you turn it on</i></span><span class="say"><span class="typed">file invoice</span></span><span class="means">File and folder names, from the index macOS already keeps.</span></div>
+        <div class="phrase"><span class="who">Any result</span><span class="say"><kbd>⌘</kbd><kbd>K</kbd></span><span class="means">Its other actions: Show in Finder, Copy Path, Quit, Copy Link.</span></div>
+      </div>
+      <p class="footnote after">Phrases in orange type themselves into the launcher above.</p>
+    </section>
+
+    <section class="section" id="plugins">
+      <header>
+        <p class="eyebrow">Plugins</p>
+        <h2>Everything has a switch. Off means off.</h2>
+        <p class="lead">Turn a feature off and it does no work: no timer, no network request, no memory held. Three start off, because they watch or index something and that's your call.</p>
+      </header>
+      <div class="tiles plugins">
+        <div class="tile on">
+          <h3>On when you install</h3>
+          <ul>
+            <li>Apps <span class="switch"></span></li>
+            <li>Calculator <span class="switch"></span></li>
+            <li>Currency <span class="switch"></span></li>
+            <li>Units <span class="switch"></span></li>
+            <li>World time <span class="switch"></span></li>
+            <li>System Settings <span class="switch"></span></li>
+            <li>Websites <span class="switch"></span></li>
+            <li>Ask <span class="switch"></span></li>
+          </ul>
+        </div>
+        <div class="tile off">
+          <h3>Off until you turn it on</h3>
+          <ul>
+            <li>Clipboard history <span class="switch"></span></li>
+            <li>File search <span class="switch"></span></li>
+            <li>Homebrew <span class="switch"></span></li>
+          </ul>
+        </div>
+      </div>
+      <p class="footnote after">Clipboard history, file search and Homebrew can each have a shortcut of their own, which opens the panel straight into them.</p>
+    </section>
+
+    <section class="section" id="weight">
+      <header>
+        <p class="eyebrow">Performance</p>
+        <h2>You shouldn't notice it's running.</h2>
+        <p class="lead">Measured on an Apple silicon Mac with about 110 apps installed.</p>
+      </header>
+      <div class="tiles figures">
+        <div class="tile figure"><b>22<small>ms</small></b><span>from the shortcut to the panel on screen, typically</span></div>
+        <div class="tile figure"><b>&lt;1<small>ms</small></b><span>from a keystroke to new results</span></div>
+        <div class="tile figure"><b>24<small>MB</small></b><span>of memory while it waits</span></div>
+        <div class="tile figure"><b>~0<small>%</small></b><span>CPU while hidden: under 10 ms of work a minute</span></div>
+        <div class="tile bars">
+          <h3>Memory</h3>
+          <div class="bar ours"><span>Rusty Spotlight</span><div class="track"><i style="width:19.7%" data-v="24 MB"></i></div></div>
+          <div class="bar"><span>Spotlight's window</span><div class="track"><i style="width:100%" data-v="122 MB"></i></div></div>
+          <p class="footnote">It keeps no index of its own. Spotlight's figure is its window alone, and leaves out the indexing services macOS runs either way.</p>
+        </div>
+        <figure class="tile film">
+          <video src="demo.mp4" poster="demo-poster.png" autoplay muted loop playsinline controls preload="metadata"
+                 aria-label="Rusty Spotlight opening on Command-Space, its glass taking each app's colours, the result list springing open, then a sum, a currency conversion, the time in Tokyo, a unit conversion and Command-K actions"></video>
+          <img src="demo-poster.png" alt="Rusty Spotlight's glass panel with a list of apps" style="display:none">
+          <figcaption class="footnote">The real thing, recorded on a Mac. The glass takes each app's colours from its icon as you move down the list.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" id="install">
+      <header>
+        <p class="eyebrow">Install</p>
+        <h2>Install with Homebrew.</h2>
+        <p class="lead">Version 0.1.1 targets macOS 14 and later on Apple silicon and Intel. Runtime testing on Sonoma is pending. Use the project’s tap for your first install.</p>
+      </header>
+      <pre class="shell"><button class="copy" data-copy="install-code">Copy</button><code id="install-code">brew install --cask blackkspydo/tap/rusty-spotlight
+open -a "Rusty Spotlight"</code></pre>
+      <p class="footnote after">Already have the tap and trust this cask? Use <code>brew install --cask rusty-spotlight</code>.</p>
+      <ol class="tile list steps">
+        <li><span><b>Press <kbd>⌥</kbd> <kbd>Space</kbd></b> to open it. A magnifying glass appears in the menu bar.</span></li>
+        <li><span><b>Allow Input Monitoring</b> when macOS asks, so other apps can't delay or swallow the shortcut. It watches for its own shortcut and nothing else.</span></li>
+        <li><span><b>To use <kbd>⌘</kbd> <kbd>Space</kbd>,</b> turn off Spotlight's shortcut in System Settings › Keyboard › Keyboard Shortcuts › Spotlight, then record Command-Space in Rusty Spotlight's Settings.</span></li>
+      </ol>
+      <p class="footnote after">Switching from a source build? Run <code>./scripts/uninstall.sh</code> in your checkout first. Source installation and update instructions are in the <a href="https://github.com/blackkspydo/rusty-spotlight#readme">README</a>.</p>
+    </section>
+  </main>
+
+  <footer class="foot footnote">
+    <p>Rusty Spotlight is free and open source, and is not made by or affiliated with Apple. Spotlight, macOS and Liquid Glass are Apple's. This page downloads no fonts and has no trackers.</p>
+    <nav><a href="changelog.html">Changelog</a><a href="https://github.com/blackkspydo/rusty-spotlight">GitHub</a></nav>
+  </footer>
+</div>
+
+<script>
+// A small imitation of the launcher, for the field at the top of the page.
+(() => {
+  const field = document.getElementById('q'), list = document.getElementById('rows'), panel = document.getElementById('panel');
+  const APPS = ['Safari', 'Notes', 'Terminal', 'Calendar', 'Music', 'Mail', 'Maps', 'Photos', 'Preview', 'Finder', 'Messages', 'Reminders', 'TextEdit', 'System Settings'];
+  const SETTINGS = [['Night Shift options', 'Displays'], ['Text Replacements', 'Keyboard'], ['Tap to click', 'Trackpad'], ['Microphone', 'Privacy & Security'], ['Hot Corners', 'Desktop & Dock'], ['Bluetooth', 'Bluetooth'], ['Wi‑Fi', 'Wi‑Fi'], ['Battery Health', 'Battery'], ['Software Update', 'General'], ['Wallpaper', 'Wallpaper'], ['Keyboard Shortcuts', 'Keyboard']];
+  const BREW = [['ripgrep', 'Search tool like grep and The Silver Searcher'], ['git', 'Distributed revision control system'], ['node', 'Platform built on V8 to build network applications'], ['ffmpeg', 'Play, record, convert and stream audio and video'], ['fd', 'Simple, fast and user-friendly alternative to find'], ['jq', 'Lightweight and flexible command-line JSON processor'], ['wget', 'Internet file retriever']];
+  const LENGTH = { km: 1000, m: 1, cm: 0.01, mm: 0.001, mi: 1609.344, ft: 0.3048, in: 0.0254, yd: 0.9144 };
+  const MASS = { kg: 1, g: 0.001, lb: 0.45359237, oz: 0.028349523 };
+  const MONEY = { usd: 1, inr: 88.2, eur: 0.92, gbp: 0.79, aed: 3.6725, jpy: 151, npr: 141.1, aud: 1.52 };
+  const ZONES = { tokyo: 'Asia/Tokyo', dubai: 'Asia/Dubai', sydney: 'Australia/Sydney', london: 'Europe/London', paris: 'Europe/Paris', berlin: 'Europe/Berlin', 'new york': 'America/New_York', 'san francisco': 'America/Los_Angeles', delhi: 'Asia/Kolkata', mumbai: 'Asia/Kolkata', kathmandu: 'Asia/Kathmandu', singapore: 'Asia/Singapore' };
+  const HUE = { Safari: '#0088ff', Notes: '#e0a800', Terminal: '#48484a', Calendar: '#ff383c', Music: '#ff2d55', Mail: '#00a6e0', Maps: '#34c759', Photos: '#ff8d28', Preview: '#6d7cff', Finder: '#00b4c4', Messages: '#34c759', Reminders: '#ff8d28', TextEdit: '#8e8e93', 'System Settings': '#8e8e93' };
+  const tidy = n => n.toLocaleString('en-US', { maximumFractionDigits: Math.abs(n) >= 10 ? 2 : 3 });
+
+  function sum(text) {
+    const pc = text.match(/^\s*([\d.]+)\s*%\s*of\s*([\d.,]+)\s*$/i);
+    if (pc) return pc[1] / 100 * pc[2].replace(/,/g, '');
+    const s = text.replace(/[\s,]/g, '').replace(/×/g, '*').replace(/÷/g, '/');
+    if (!/^[\d.+\-*/^()%]+$/.test(s) || !/\d[+\-*/^%]/.test(s)) return null;
+    let i = 0;
+    const expr = () => { let v = term(); while (s[i] === '+' || s[i] === '-') { const op = s[i++]; let r = term(); if (s[i] === '%') { i++; r = v * r / 100; } v = op === '+' ? v + r : v - r; } return v; };
+    const term = () => { let v = power(); while (s[i] === '*' || s[i] === '/') { const op = s[i++], r = power(); v = op === '*' ? v * r : v / r; } return v; };
+    const power = () => { const b = atom(); if (s[i] === '^') { i++; return Math.pow(b, power()); } return b; };
+    const atom = () => {
+      if (s[i] === '-') { i++; return -atom(); }
+      if (s[i] === '(') { i++; const v = expr(); if (s[i++] !== ')') throw 0; return v; }
+      const m = /^\d*\.?\d+/.exec(s.slice(i)); if (!m) throw 0; i += m[0].length; return +m[0];
+    };
+    try { const v = expr(); return i === s.length && isFinite(v) ? v : null; } catch { return null; }
+  }
+
+  function convert(text) {
+    const m = text.match(/^\s*([\d.,]+)\s*([a-z]+)\s+(?:to|in)\s+([a-z]+)\s*$/i);
+    if (!m) return null;
+    const n = +m[1].replace(/,/g, ''), a = m[2].toLowerCase(), b = m[3].toLowerCase();
+    if (!isFinite(n)) return null;
+    for (const table of [LENGTH, MASS]) if (a in table && b in table) return { hue: '#00b39f', glyph: '⇄', title: tidy(n * table[a] / table[b]) + ' ' + b, sub: tidy(n) + ' ' + a, act: 'Copy' };
+    if (a === 'f' && b === 'c') return { hue: '#ff383c', glyph: '°', title: tidy((n - 32) * 5 / 9) + ' °C', sub: tidy(n) + ' °F', act: 'Copy' };
+    if (a === 'c' && b === 'f') return { hue: '#ff383c', glyph: '°', title: tidy(n * 9 / 5 + 32) + ' °F', sub: tidy(n) + ' °C', act: 'Copy' };
+    if (a in MONEY && b in MONEY) return { hue: '#34c759', glyph: '¤', title: tidy(n / MONEY[a] * MONEY[b]) + ' ' + b.toUpperCase(), sub: 'A sample rate. The app fetches today\'s.', act: 'Copy' };
+    return null;
+  }
+
+  function clock(text) {
+    const m = text.trim().toLowerCase().match(/^(?:time in (.+)|(.+) time)$/);
+    const place = m && (m[1] || m[2]);
+    if (!place || !ZONES[place]) return null;
+    const now = new Intl.DateTimeFormat('en-US', { timeZone: ZONES[place], hour: 'numeric', minute: '2-digit', weekday: 'long' }).format(new Date());
+    return { hue: '#6d7cff', glyph: '◷', title: now, sub: place.replace(/\b\w/g, c => c.toUpperCase()) + ', right now', act: 'Copy' };
+  }
+
+  function rows(text) {
+    const q = text.trim().toLowerCase();
+    if (!q) return [];
+    if (q === 'brew' || q.startsWith('brew ')) {
+      const want = q.slice(5).trim();
+      return BREW.filter(p => p[0].includes(want)).sort((a, b) => a[0].indexOf(want) - b[0].indexOf(want)).slice(0, 5).map(p => ({ hue: '#ac7f5e', glyph: '⬡', title: p[0], sub: p[1], act: 'Install' }));
+    }
+    const v = sum(text);
+    if (v !== null) return [{ hue: '#ff8d28', glyph: '=', title: tidy(v), sub: text.trim(), act: 'Copy', answer: true }];
+    const answer = convert(text) || clock(text);
+    if (answer) return [{ ...answer, answer: true }];
+    const starts = (name, pre) => name.toLowerCase().split(/[\s‑-]+/).some(w => w.startsWith(pre)) || name.toLowerCase().replace(/[^a-z0-9 ]/g, '').startsWith(pre);
+    const apps = APPS.filter(a => starts(a, q)).map(a => ({ hue: HUE[a], glyph: a[0], title: a, sub: 'Application', act: 'Open' }));
+    const settings = q.length < 2 ? [] : SETTINGS.filter(s => starts(s[0], q) || s[0].toLowerCase().startsWith(q)).map(s => ({ hue: '#8e8e93', glyph: '⚙', title: s[0], sub: s[0] === s[1] ? 'System Settings' : 'System Settings › ' + s[1], act: 'Open' }));
+    return [...apps, ...settings].slice(0, 5);
+  }
+
+  let chosen = 0;
+  function paint() {
+    const found = rows(field.value);
+    chosen = Math.min(chosen, Math.max(found.length - 1, 0));
+    list.replaceChildren(...found.map((r, i) => {
+      const li = document.createElement('li');
+      li.className = 'row' + (r.answer ? ' answer' : '');
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', i === chosen);
+      const part = (cls, text) => { const el = document.createElement('span'); el.className = cls; el.textContent = text; return el; };
+      const what = part('what', '');
+      what.append(part('title', r.title), part('sub', r.sub));
+      const glyph = part('glyph', r.glyph); glyph.style.background = r.hue;
+      li.append(glyph, what, part('do', r.act + ' ↩'));
+      li.addEventListener('pointerenter', () => { if (chosen !== i) { chosen = i; for (const [j, el] of [...list.children].entries()) el.setAttribute('aria-selected', j === i); panel.style.setProperty('--row', r.hue); } });
+      return li;
+    }));
+    panel.classList.toggle('open', found.length > 0);
+    panel.style.setProperty('--row', found.length ? found[chosen].hue : '#8e8e93');
+  }
+
+  // Until someone touches it, it types a few things by itself.
+  const SHOW = ['saf', '15% of 2400', 'night shift', '5 km to mi', 'time in tokyo', 'brew rip'];
+  let touched = false, timer = 0;
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function perform(n = 0, at = 0) {
+    if (touched) return;
+    const word = SHOW[n % SHOW.length];
+    if (at <= word.length) { field.value = word.slice(0, at); chosen = 0; paint(); timer = setTimeout(perform, at === word.length ? 2200 : 85, n, at + 1); }
+    else { field.value = ''; paint(); timer = setTimeout(perform, 500, n + 1, 0); }
+  }
+  function take() { if (touched) return; touched = true; clearTimeout(timer); field.value = ''; paint(); }
+  field.addEventListener('pointerdown', take);
+  field.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') take();
+    const n = list.children.length;
+    if (e.key === 'ArrowDown' && n) { chosen = (chosen + 1) % n; paint(); e.preventDefault(); }
+    if (e.key === 'ArrowUp' && n) { chosen = (chosen + n - 1) % n; paint(); e.preventDefault(); }
+    if (e.key === 'Escape') { field.value = ''; paint(); }
+  });
+  field.addEventListener('input', () => { chosen = 0; paint(); });
+  if (still) { field.value = '15% of 2400'; paint(); } else { timer = setTimeout(perform, 900); }
+
+  // A phrase in the phrasebook types itself into the field.
+  for (const b of document.querySelectorAll('button.try')) {
+    b.addEventListener('click', () => {
+      touched = true; clearTimeout(timer);
+      field.value = b.textContent; chosen = 0; paint();
+      document.getElementById('try').scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' });
+      field.focus({ preventScroll: true });
+    });
+  }
+
+  for (const b of document.querySelectorAll('.copy')) {
+    b.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(document.getElementById(b.dataset.copy).innerText); b.textContent = 'Copied'; }
+      catch { b.textContent = 'Select and copy'; }
+      setTimeout(() => (b.textContent = 'Copy'), 1600);
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rusty Spotlight Changelog</title>
+<meta name="description" content="What's new in Rusty Spotlight, the Spotlight replacement for macOS written in Rust.">
+<meta property="og:title" content="Rusty Spotlight Changelog">
+<meta property="og:description" content="What's new in Rusty Spotlight.">
+<meta property="og:image" content="demo-poster.png">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="AppIcon.png">
+<link rel="stylesheet" href="style.css">
+<!--
+  Adding to the changelog: put the newest day first in main, as a
+  section.day with its date, a title, and one article.entry per feature or
+  fix inside the "tile list". Kinds: New, Improved, Fixed. Plain words: what
+  it does for someone using it, and what to type to try it. Then update the
+  "New" line at the top of index.html.
+-->
+</head>
+<body>
+<div class="edge" aria-hidden="true"></div>
+<div class="wrap">
+  <header class="toolbar glass">
+    <a class="name" href="./"><img src="AppIcon.png" alt="">Rusty Spotlight</a>
+    <a class="item" href="changelog.html" aria-current="page">Changelog</a>
+    <a class="item gh" href="https://github.com/blackkspydo/rusty-spotlight">GitHub</a>
+    <a class="button small" href="./#install">Install</a>
+  </header>
+
+  <div class="pagehead">
+    <h1>Changelog</h1>
+    <p class="lead">What changed, newest first. For Homebrew installs, update with <code>brew upgrade --cask rusty-spotlight</code>.</p>
+  </div>
+
+  <main>
+    <section class="day" id="v0-1-1">
+      <p class="date">26 November 2026 · Version 0.1.1</p>
+      <h2>Native blur on older Macs</h2>
+      <p class="lead">The launcher and Appearance preview now choose their material automatically. Both architectures target macOS 14.0. Runtime testing on Sonoma is pending.</p>
+    </section>
+    <section class="day" id="2026-11-26">
+      <p class="date">26 November 2026 · Version 0.1.0</p>
+      <h2>Install with Homebrew</h2>
+      <div class="tile list">
+        <article class="entry">
+          <span class="kind">New</span>
+          <div>
+            <h3>A signed release for Apple silicon and Intel</h3>
+            <p>Follow the <a href="./#install">Homebrew install instructions</a> and open Rusty Spotlight from Applications. Use Settings to choose whether it opens at login.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+    <section class="day" id="2026-11-23">
+      <p class="date">23 November 2026</p>
+        <h2>Plugins, and four new things to search</h2>
+        <p class="lead">Every feature became a plugin you can switch off. System Settings, Homebrew, clipboard history and file search arrived.</p>
+        <div class="tile list">
+        <article class="entry">
+          <span class="kind">New</span>
+          <div>
+            <h3>System Settings search <span class="state">On by default</span></h3>
+            <p>Search the places inside System Settings, not only its name. <code>night shift</code>, <code>text replacements</code>, <code>tap to click</code>, <code>microphone</code> or <code>hot corners</code> lists that setting, and Return opens System Settings right there.</p>
+            <p>About 650 panes and sections, read from the panes installed on your Mac, in your language. Nothing is fetched.</p>
+          </div>
+        </article>
+
+        <article class="entry">
+          <span class="kind">New</span>
+          <div>
+            <h3>Homebrew <span class="state">Off by default</span></h3>
+            <p><code>brew ripgrep</code> searches every formula and cask: best name match first, then by installs over the last 30 days. Return installs it and the first row follows the progress. Command-K upgrades, uninstalls, opens the home page or copies the command.</p>
+            <p>The catalogue is refreshed weekly by a helper process, so the launcher's own memory doesn't grow.</p>
+          </div>
+        </article>
+
+        <article class="entry">
+          <span class="kind">New</span>
+          <div>
+            <h3>Clipboard history <span class="state">Off by default</span></h3>
+            <p><code>clip</code> lists recent copies, including images and files, and Return puts one back on the clipboard. Pin the ones to keep. Anything a password manager marks as secret, or copied while Passwords or Keychain Access is in front, is never kept.</p>
+            <p class="by">Contributed by Aabishkar Aryal in <a href="https://github.com/blackkspydo/rusty-spotlight/pull/2">PR #2</a>.</p>
+          </div>
+        </article>
+
+        <article class="entry">
+          <span class="kind">New</span>
+          <div>
+            <h3>File search <span class="state">Off by default</span></h3>
+            <p>File and folder names from Spotlight's own index, listed under apps once you've typed two letters, or on their own after <code>file</code>. Rusty Spotlight still keeps no index of its own.</p>
+            <p class="by">Contributed by Aabishkar Aryal in <a href="https://github.com/blackkspydo/rusty-spotlight/pull/2">PR #2</a>.</p>
+          </div>
+        </article>
+
+        <article class="entry">
+          <span class="kind">New</span>
+          <div>
+            <h3>Plugins you can switch off</h3>
+            <p>Apps, Ask, Websites, Calculator, Currency, Units, World time and the new plugins can each be turned off in Settings › Plugins, or with <code>enabled = false</code> under <code>[plugins.&lt;name&gt;]</code> in the configuration file. Off means no work at all: with Currency off, no exchange rate is ever fetched.</p>
+          </div>
+        </article>
+
+        <article class="entry">
+          <span class="kind">New</span>
+          <div>
+            <h3>A shortcut per plugin</h3>
+            <p>Give clipboard history, file search or Homebrew a shortcut of its own and the panel opens straight into it: whatever you type searches that plugin. Press it again to close, or another plugin's shortcut to switch.</p>
+          </div>
+        </article>
+
+        <article class="entry">
+          <span class="kind">Improved</span>
+          <div>
+            <h3>Settings › Plugins</h3>
+            <p>Plugins are listed down the left, each with its own page holding its switch, its shortcut and its options: aliases under Apps, keywords under Websites, the default currency under Currency, how long clipboard history is kept.</p>
+          </div>
+        </article>
+
+        <article class="entry">
+          <span class="kind">Fixed</span>
+          <div>
+            <h3>From the code and security reviews</h3>
+            <ul>
+              <li>Homebrew search is back under 1 ms a keystroke, and its catalogue is let go when the panel closes or the plugin is switched off.</li>
+              <li>A full clipboard history drops the oldest copy, not the one just made.</li>
+              <li>A copy made in an ignored app stays ignored even if you switch apps straight away.</li>
+              <li>A tampered Homebrew index can no longer slip shell text into the command offered for copying, and only web pages open as home pages.</li>
+              <li>A rejected shortcut puts the previous one back.</li>
+            </ul>
+          </div>
+        </article>
+        </div>
+</section>
+
+    <section class="day" id="2026-11-22">
+      <p class="date">22 November 2026 · Version 0.0.1</p>
+        <h2>First release</h2>
+        <p class="lead">Rusty Spotlight goes public.</p>
+        <div class="tile list">
+        <article class="entry">
+          <span class="kind">New</span>
+          <div>
+            <h3>One field for everything</h3>
+            <ul>
+              <li><b>Apps</b>, which learns the results you pick and switches to an app that's already open.</li>
+              <li><b>Calculator</b>: <code>15% of 2400</code>. <b>Currency</b>: <code>100 usd to inr</code>, with live rates kept for offline use.</li>
+              <li><b>Units</b>: <code>5 km to mi</code>. <b>World time</b>: <code>3pm ist to sydney</code>.</li>
+              <li><b>Websites</b> with your own keywords: <code>gh rust-lang/rust</code>.</li>
+              <li><b>Ask</b>: <code>? how do I untar a file</code> asks Claude Code, Codex or Grok, already on your Mac.</li>
+              <li><b>Command-K</b> for the selected result's other actions.</li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="entry">
+          <span class="kind">New</span>
+          <div>
+            <h3>Glass that follows, and a Settings window</h3>
+            <p>The Liquid Glass panel takes each app's colours from its icon, or Aurora, your accent colour, or none. Settings covers the shortcut, open at login, the menu bar icon, glass colour and motion. And an app icon.</p>
+          </div>
+        </article>
+
+        <article class="entry">
+          <span class="kind">Improved</span>
+          <div>
+            <h3>Faster to open, and on the right Space</h3>
+            <p>From the shortcut to the panel on screen in 22 ms typically (was 48 ms). The panel now opens on the Space you're on, including over full-screen apps, where it used to appear off screen.</p>
+          </div>
+        </article>
+        </div>
+</section>
+  </main>
+
+  <footer class="foot footnote">
+    <p>Every commit is on <a href="https://github.com/blackkspydo/rusty-spotlight/commits/main">GitHub</a>.</p>
+    <nav><a href="./">Home</a><a href="https://github.com/blackkspydo/rusty-spotlight">GitHub</a></nav>
+  </footer>
+</div>
+</body>
+</html>
