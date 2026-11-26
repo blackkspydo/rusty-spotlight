@@ -26,10 +26,14 @@ Return copies the answer to a sum, conversion or question, and opens a file or f
 
 Rusty Spotlight runs on Apple silicon and Intel Macs with macOS 26 (Tahoe) or later. If you're switching from a source install, run `./scripts/uninstall.sh` from your checkout first to remove its login item.
 
+For a first install, use the project's Homebrew tap.
+
 ```sh
 brew install --cask blackkspydo/tap/rusty-spotlight
 open -a "Rusty Spotlight"
 ```
+
+Once Homebrew has added the tap and trusted the cask on this Mac, you can install by short name with `brew install --cask rusty-spotlight`.
 
 Press **Option-Space** to open the launcher. To update, run `brew upgrade --cask rusty-spotlight`. To remove the app, run `brew uninstall --cask rusty-spotlight`.
 
