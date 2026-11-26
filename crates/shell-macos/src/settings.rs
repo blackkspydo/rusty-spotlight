@@ -576,11 +576,29 @@ fn agent_plist() -> PathBuf {
     home().join(format!("Library/LaunchAgents/{AGENT}.plist"))
 }
 
-/// Whether the login item (scripts/install.sh's LaunchAgent) is on. `None`
-/// when there is no LaunchAgent, e.g. when running from a build folder.
+#[link(name = "ServiceManagement", kind = "framework")]
+unsafe extern "C" {}
+
+/// The app's own login item (SMAppService.mainApp), for a copy installed as
+/// an app without scripts/install.sh's LaunchAgent, e.g. from Homebrew.
+/// `None` when running from a build folder, which can't be a login item.
+fn login_service() -> Option<Retained<AnyObject>> {
+    let exe = std::env::current_exe().ok()?;
+    if !exe.to_string_lossy().contains(".app/Contents/MacOS/") {
+        return None;
+    }
+    let class = objc2::runtime::AnyClass::get(c"SMAppService")?;
+    unsafe { msg_send![class, mainAppService] }
+}
+
+/// Whether the app opens at login. `None` when it can't, e.g. when running
+/// from a build folder.
 fn login_enabled() -> Option<bool> {
     if !agent_plist().exists() {
-        return None;
+        let service = login_service()?;
+        // SMAppServiceStatus: 1 is enabled.
+        let status: NSInteger = unsafe { msg_send![&*service, status] };
+        return Some(status == 1);
     }
     let out = std::process::Command::new("/bin/launchctl")
         .args(["print-disabled", &format!("gui/{}", unsafe { getuid() })])
@@ -593,12 +611,44 @@ fn login_enabled() -> Option<bool> {
 }
 
 fn set_login(on: bool) {
-    let verb = if on { "enable" } else { "disable" };
-    let ok = std::process::Command::new("/bin/launchctl")
-        .args([verb, &format!("gui/{}/{AGENT}", unsafe { getuid() })])
-        .status()
-        .is_ok_and(|s| s.success());
+    let ok = if agent_plist().exists() {
+        let verb = if on { "enable" } else { "disable" };
+        std::process::Command::new("/bin/launchctl")
+            .args([verb, &format!("gui/{}/{AGENT}", unsafe { getuid() })])
+            .status()
+            .is_ok_and(|s| s.success())
+    } else if let Some(service) = login_service() {
+        let no_error = std::ptr::null_mut::<*mut AnyObject>();
+        unsafe {
+            if on {
+                msg_send![&*service, registerAndReturnError: no_error]
+            } else {
+                msg_send![&*service, unregisterAndReturnError: no_error]
+            }
+        }
+    } else {
+        false
+    };
     event_log(&format!("open at login: {}", if !ok { "could not change" } else if on { "on" } else { "off" }));
+}
+
+/// Open at login starts on, as it does for scripts/install.sh. A copy
+/// installed as an app has nothing to switch it on, so its first run does,
+/// once; after that the switch in Settings decides.
+pub fn first_run() {
+    if agent_plist().exists() || login_service().is_none() {
+        return;
+    }
+    let marker = home().join("Library/Application Support/rusty-spotlight/login-item-set");
+    if marker.exists() {
+        return;
+    }
+    if let Some(folder) = marker.parent() {
+        let _ = std::fs::create_dir_all(folder);
+    }
+    if std::fs::write(&marker, "").is_ok() {
+        set_login(true);
+    }
 }
 
 // ---------------------------------------------------------------- appearance helpers
@@ -931,7 +981,7 @@ fn general(mtm: MainThreadMarker) -> Retained<NSViewController> {
 
     let login = checkbox("Open Rusty Spotlight when you log in", sel!(loginChanged:), mtm);
     f.row("Start:", &login, 330.0, 20.0);
-    let login_note = f.note("Install with scripts/install.sh to open at login.");
+    let login_note = f.note("Install the app to open at login.");
     f.gap(14.0);
     let menu_icon = checkbox("Show icon in menu bar", sel!(menuIconChanged:), mtm);
     f.row("Menu bar:", &menu_icon, 330.0, 20.0);

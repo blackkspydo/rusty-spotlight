@@ -194,6 +194,7 @@ fn main() {
 
     // Menu bar item: Open, Settings, Quit. It can be hidden from Settings.
     settings::install(&controller, mtm);
+    settings::first_run();
     app.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*controller)));
 
     // A rate that arrives while the panel is open is shown as a new presentation.
