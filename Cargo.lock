@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nucleo-matcher",
  "unicode-normalization",
@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-spotlight"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "block2",
  "global-hotkey",
